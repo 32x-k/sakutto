@@ -66,6 +66,12 @@ For PLaMo's 53 languages, every translated line comes from PLaMo. On Chrome, Chr
     </td>
   </tr>
   <tr>
+    <td colspan="2" valign="top">
+      <h3>Gmail message banner</h3>
+      <p>On <code>mail.google.com</code>, a banner above each expanded message offers to translate that body only when the language differs from your target. Nothing runs until you click; × after translation restores the original and hides the banner for that message. Access uses the existing optional host permission for the site.</p>
+    </td>
+  </tr>
+  <tr>
     <td width="54%" valign="top">
       <h3>PDF reader translation</h3>
       <p>Browsers draw PDFs in their own viewer, which extensions cannot read. Sakutto reads the file itself, opens it in its own reader, and translates page by page — English papers into Japanese, Japanese documents into English, or any other supported direction.</p>
@@ -206,7 +212,7 @@ The model file is not bundled. You can remove it and clear the translation cache
 | `scripting`        | Injects the content script into the active tab after you ask for a translation.      |
 | `contextMenus`     | Adds Translate page, Translate selection, and Translate PDF to the right-click menu. |
 
-Optional host permissions (`https://*/*` and `http://*/*`) are requested only when you turn on automatic translation for a site, enable video captions, or add a custom caption site. Nothing is requested for every site at install time. The PDF reader adds no permission: it reads the file from the origin the `activeTab` grant already covers. Access to a local server is also optional.
+Optional host permissions (`https://*/*` and `http://*/*`) are requested only when you turn on automatic translation for a site, enable video captions, add a custom caption site, or use the Gmail message banner on that site. Nothing is requested for every site at install time. The PDF reader adds no permission: it reads the file from the origin the `activeTab` grant already covers. Access to a local server is also optional.
 
 ## Development
 

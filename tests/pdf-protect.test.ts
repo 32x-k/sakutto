@@ -20,7 +20,7 @@ describe('protectInlineMath', () => {
     const block = layout.blocks[0];
     if (!block) throw new Error('expected a block');
     const protectedText = protectInlineMath(block);
-    expect(protectedText.slots).toEqual(['q, k', 'v']);
+    expect(protectedText.slots.map((slot) => slot.text)).toEqual(['q, k', 'v']);
     expect(protectedText.text).toContain('<i0>');
     expect(protectedText.text).toContain('<i1>');
     expect(protectedText.text).not.toMatch(/(?<!<i0>)\bq\b/u);
@@ -62,7 +62,7 @@ describe('protectInlineMath', () => {
     const lines = groupLines([
       piece('Let ', 49, 100, 18),
       piece('S', 67, 100, 8, { italic: true }),
-      piece('t', 74, 100, 6, { size: 7, em: 10 }),
+      piece('t', 74, 101.2, 6, { size: 7, em: 10 }),
       piece(' = (I − β)', 80, 100, 48),
       piece('k', 128, 100, 6, { italic: true }),
       piece(' hold the recurrent state of the layer.', 134, 100, 200),
@@ -73,7 +73,7 @@ describe('protectInlineMath', () => {
     const protectedText = protectInlineMath(block);
     expect(protectedText.slots.length).toBeGreaterThan(0);
     expect(protectedText.text).toContain('<i0>');
-    expect(protectedText.slots.some((slot) => slot.includes('t'))).toBe(true);
+    expect(protectedText.slots.some((slot) => slot.text.includes('t'))).toBe(true);
   });
 
   it('skips a sentence that is mostly inline mathematics', () => {

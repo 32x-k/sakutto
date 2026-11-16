@@ -2,11 +2,11 @@
 
 Release sections are added by `pnpm release`. Each section lists commit subjects since the previous `vX.Y.Z` tag.
 
-## [Unreleased]
+## [1.6.1] - 2026-11-16
 
 ### Bug Fixes
 
-- Gmail and Outlook message banners no longer ask for install-time host access. The mail sites use a one-time optional permission, like YouTube subtitles; the background registers the banner scripts only for the origins you grant, and removes them when access is revoked.
+- Gmail and Outlook message banners no longer ask for install-time host access (#98). The first time you use them, open the Sakutto popup on Gmail or Outlook and allow access once, the same way YouTube subtitles work; after that the banner appears automatically. The banner scripts run only on the mail sites you allow and are removed if you revoke access. Install-time permissions are back to the same set as 1.5.1.
 
 ## [1.6.0] - 2026-11-16
 

@@ -2,6 +2,13 @@
 
 Release sections are added by `pnpm release`. Each section lists commit subjects since the previous `vX.Y.Z` tag.
 
+## [1.6.2] - 2026-11-16
+
+### Bug Fixes
+
+- Gmail and Outlook message translate banners no longer appear twice or flicker after you reload the extension, restart the browser, or open several Gmail tabs at once (#101).
+- Spreadsheet-style tables on web pages translate more reliably: cell detection now checks every ancestor depth, so nested table layouts no longer skip rows (#94, thanks @Seyamalam).
+
 ## [1.6.1] - 2026-11-16
 
 ### Bug Fixes

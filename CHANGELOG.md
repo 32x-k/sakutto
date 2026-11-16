@@ -4,21 +4,22 @@ Release sections are added by `pnpm release`. Each section lists commit subjects
 
 ## [1.6.0] - 2026-11-16
 
+### Permissions
+
+- The extension now asks at install for access to Gmail (mail.google.com) and Outlook on the web (outlook.live.com, outlook.office.com, outlook.office365.com, outlook.cloud.microsoft) so the mail translate banner can appear without opening the popup. Existing users may be asked to approve this on update. No other sites are added.
+
 ### Features
 
 - Gmail messages get a Sakutto banner above the body when the message is written in a language other than the target (#88). It identifies the source language, translates only that message after a click, toggles back with Show original, and can be closed per message. Each expanded message in a thread has its own banner, and the setting can turn the feature off. The model loads only when Translate is clicked.
 - After translating a Gmail message, the bar shows a Gmail-style "Translated" state with Show original / Show translation using the cached translation (#92). A gear menu offers Translate <language>, Always translate <language>, and Never translate <language> (mutually exclusive auto/never lists). The options page has a section to review and clear those lists.
+- Outlook on the web gets the same per-message translate banner as Gmail (#96). It works on outlook.live.com, outlook.office.com, outlook.office365.com, and outlook.cloud.microsoft. The banner appears automatically when a message is in a language other than the target, and nothing is translated until Translate is clicked. It shares the Gmail auto/never language lists and the existing message-banner setting.
+- While a Gmail or Outlook message is being translated, the banner shows progress as a percentage and replaces paragraphs as soon as each one is translated (#96).
 
 ### Bug Fixes
 
 - On pages declared Japanese (e.g. Steam discussions in the Japanese UI), English posts that contain a Japanese quote label are now translated (#91). Language is detected on each block's own text, and kanji-only labels on Japanese pages are no longer sent for translation, so Japanese pages send far fewer blocks.
 - Superscripts and subscripts are no longer lost in translations (#95). In the PDF reader, raised/lowered characters such as CH₄, 10³, m³, x², H₂O and reference markers stay in the translation as superscript/subscript instead of disappearing or turning into a wrong number like 103; on web pages `<sub>`/`<sup>` content is kept.
-
-## [Unreleased]
-
-### Features
-
-- Outlook on the web gets the same per-message translate banner as Gmail. It works on outlook.live.com, outlook.office.com, outlook.office365.com, and outlook.cloud.microsoft; the banner offers a translation only when the message language differs from the target, and nothing runs until Translate is clicked. It shares the Gmail auto/never language lists and the existing message-banner setting.
+- Subscripts and superscripts that publishers mark up with styled spans (such as NLM sub/sup classes or vertical-align) are kept in full-page web translations, and an empty or dropped slot falls back to the original text (#97).
 
 ## [1.5.1] - 2026-11-14
 

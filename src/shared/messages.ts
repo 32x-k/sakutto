@@ -135,10 +135,7 @@ export interface ShortcutAssigned {
   'translate-compose': boolean;
 }
 
-/**
- * Live bindings plus the persisted "ever assigned" map a page needs to decide whether the
- * in-page default should still run.
- */
+/** Live bindings plus the persisted "ever assigned" map used by Firefox restoration. */
 export interface ShortcutQueryResult {
   snapshot: ShortcutSnapshot;
   assigned: ShortcutAssigned;

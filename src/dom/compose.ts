@@ -8,7 +8,7 @@ import {
   type TargetLanguage,
 } from '@/shared/languages';
 import { COMPOSE_PREVIEW_MS, planComposeTranslation } from '@/shared/compose-translation';
-import { displayShortcut, matchesShortcut } from '@/shared/shortcuts';
+import { displayShortcut } from '@/shared/shortcuts';
 import { displayTargetLanguage } from '@/ui/language-label';
 import {
   COMPOSE_PLACEMENTS,
@@ -117,7 +117,7 @@ export interface ComposePreferences {
 }
 
 const ICON_PX = 26;
-/** Chrome's command and the page keydown can both arrive for one keypress. */
+/** Defensive deduplication for duplicate native compose command delivery. */
 const COMPOSE_SHORTCUT_DEDUP_MS = 200;
 
 const uiShadows = new WeakMap<Element, ShadowRoot>();
@@ -1286,7 +1286,6 @@ export interface ComposeControllerOptions {
   engine: PageEngine;
   labels: ComposeLabels;
   preferences: ComposePreferences;
-  composeKey?: (event: KeyboardEvent) => boolean;
   previewMs?: number;
   onWarm?: () => void;
   onSetup?: () => void;
@@ -1304,7 +1303,6 @@ export interface ComposeControllerOptions {
 export class ComposeController {
   private readonly engine: PageEngine;
   private readonly overlay: ComposeOverlay;
-  private readonly composeKey: (event: KeyboardEvent) => boolean;
   private readonly previewMs: number;
   private readonly onWarm: (() => void) | undefined;
   private readonly onSetup: (() => void) | undefined;
@@ -1356,7 +1354,6 @@ export class ComposeController {
     this.labels = options.labels;
     this.prefs = options.preferences;
     this.previewMs = options.previewMs ?? COMPOSE_PREVIEW_MS;
-    this.composeKey = options.composeKey ?? ((event) => matchesShortcut(event, 'Alt+T'));
     this.onWarm = options.onWarm;
     this.onSetup = options.onSetup;
     this.onTarget = options.onTarget;
@@ -1400,6 +1397,12 @@ export class ComposeController {
     if (this.panelOpen) this.render();
   }
 
+  setReplaceShortcut(shortcut: string): void {
+    if (this.prefs.replaceShortcut === shortcut) return;
+    this.prefs = { ...this.prefs, replaceShortcut: shortcut };
+    this.overlay.setReplaceShortcut(shortcut);
+  }
+
   setPreferences(prefs: ComposePreferences): void {
     const languageChanged =
       prefs.targetLanguage !== this.prefs.targetLanguage ||
@@ -1421,7 +1424,7 @@ export class ComposeController {
     } else if (this.panelOpen) this.render();
   }
 
-  /** Chrome command, context menu, or the in-page key. Never sends the message. */
+  /** Native browser command or context menu. Never sends the message. */
   handleShortcut(source?: EventTarget | null): void {
     if (this.replacing) return;
     const now = Date.now();
@@ -1624,9 +1627,9 @@ export class ComposeController {
   }
 
   private handleKey(event: Event): void {
-    if (!(event instanceof KeyboardEvent) || event.repeat) return;
+    if (!(event instanceof KeyboardEvent) || event.repeat || event.isComposing) return;
     if (event.key === 'Escape') {
-      if (event.isComposing || !this.panelOpen) return;
+      if (!this.panelOpen) return;
       if (!this.escapeClosesFrom(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
@@ -1638,15 +1641,6 @@ export class ComposeController {
       this.dismiss();
       return;
     }
-    if (this.composeKey(event)) {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      if (this.replacing) return;
-      this.handleShortcut(event.target);
-      return;
-    }
-    if (event.isComposing) return;
     if (this.panelOpen && isTranslateShortcut(event)) {
       event.preventDefault();
       event.stopPropagation();

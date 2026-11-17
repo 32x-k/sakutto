@@ -19,6 +19,7 @@ import {
   isPageInfo,
   isPageInfoRequest,
   isPageViewState,
+  isShortcutQuery,
   isShortcutQueryResult,
   isShortcutSnapshot,
 } from '@/shared/messages';
@@ -55,7 +56,7 @@ describe('message validation', () => {
         'translate-compose': 'Alt+T',
       }),
     ).toBe(true);
-    // `null` is a command Chrome did not list; `''` is one the user unbound.
+    // `null` is a command Chrome did not list; `''` is an explicitly empty binding.
     expect(
       isShortcutSnapshot({
         'translate-page': null,
@@ -82,7 +83,12 @@ describe('message validation', () => {
     expect(isShortcutSnapshot(null)).toBe(false);
   });
 
-  it('validates the assigned map a page needs beside the snapshot', () => {
+  it('validates the shortcut query type', () => {
+    expect(isShortcutQuery({ type: 'commands:shortcuts' })).toBe(true);
+    expect(isShortcutQuery({ type: 'commands:other' })).toBe(false);
+  });
+
+  it('validates the assigned map used for Firefox restoration', () => {
     const snapshot = {
       'translate-page': 'Alt+A',
       'toggle-bilingual': '',

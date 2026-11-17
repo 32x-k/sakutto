@@ -50,10 +50,7 @@ import {
   boundShortcut,
   defaultShortcutEnabled,
   displayShortcut,
-  emptyShortcutAssigned,
   isMacPlatform,
-  matchesShortcut,
-  type ShortcutAssigned,
   type ShortcutCommand,
   type ShortcutEnabled,
 } from '@/shared/shortcuts';
@@ -94,13 +91,7 @@ interface ContentBridgeGlobal {
 
 const bridge = globalThis as typeof globalThis & ContentBridgeGlobal;
 
-/**
- * The browser only tells a page which keys are bound through the background worker. An
- * empty snapshot keeps the manifest defaults until that answer arrives. A command the
- * browser never assigned uses the per-OS default on this page; one the user cleared does
- * not. The fallback cannot run on chrome:// pages or the PDF viewer, where this script is
- * not injected. A key Chrome did assign is delivered as onCommand even inside a text field.
- */
+/** Browser bindings are read only to label compose UI; commands never originate on the page. */
 async function readShortcutState(): Promise<ShortcutQueryResult | null> {
   const response: unknown = await browser.runtime
     .sendMessage({ type: 'commands:shortcuts' })
@@ -113,27 +104,13 @@ async function readShortcutState(): Promise<ShortcutQueryResult | null> {
 
 function shortcutFor(
   snapshot: ShortcutSnapshot | null,
-  assigned: ShortcutAssigned,
   enabled: ShortcutEnabled,
   command: ShortcutCommand,
 ): string {
   return boundShortcut(snapshot, command, {
     enabled: enabled[command],
-    assigned: assigned[command],
     mac: isMacPlatform(),
   });
-}
-
-function listensFor(
-  snapshot: ShortcutSnapshot | null,
-  assigned: ShortcutAssigned,
-  enabled: ShortcutEnabled,
-  command: ShortcutCommand,
-): (event: KeyboardEvent) => boolean {
-  return (event) => {
-    const shortcut = shortcutFor(snapshot, assigned, enabled, command);
-    return shortcut.length > 0 && matchesShortcut(event, shortcut);
-  };
 }
 
 function composePreferencesFor(
@@ -372,10 +349,8 @@ export function contentMain(): void {
   claimContentExtensionInstance(document, instanceToken);
 
   const host = pageHost(location.href) ?? '';
-  // The browser's bindings, or the manifest defaults until the background answers. A
-  // command the browser never assigned still uses its default; one the user cleared does not.
+  // Browser bindings label compose UI only. All translation commands arrive from the background.
   let shortcutSnapshot: ShortcutSnapshot | null = null;
-  let shortcutAssigned = emptyShortcutAssigned();
   let shortcutsEnabled = defaultShortcutEnabled();
   let lastCommand = '';
   let lastCommandAt = 0;
@@ -403,24 +378,13 @@ export function contentMain(): void {
   let folderNeedsUserAction = false;
   let plamoReady = false;
   let modelStatusKnown = false;
-  const publishPageShortcut = (): void => {
-    if (!shortcutSnapshot) {
-      delete document.documentElement.dataset.sakuttoPageShortcut;
-      return;
-    }
-    document.documentElement.dataset.sakuttoPageShortcut = shortcutFor(
-      shortcutSnapshot,
-      shortcutAssigned,
-      shortcutsEnabled,
-      'translate-page',
-    );
-  };
   const refreshShortcuts = (): void => {
     void readShortcutState().then((state) => {
       if (!state) return;
       shortcutSnapshot = state.snapshot;
-      shortcutAssigned = state.assigned;
-      publishPageShortcut();
+      compose?.setReplaceShortcut(
+        displayShortcut(shortcutFor(shortcutSnapshot, shortcutsEnabled, 'translate-compose')),
+      );
     });
   };
   let shortcutRefreshTimer = 0;
@@ -429,8 +393,7 @@ export function contentMain(): void {
     shortcutRefreshTimer = window.setTimeout(refreshShortcuts, 80);
   };
   refreshShortcuts();
-  // Chrome has no commands.onChanged on older builds, and no way to write a shortcut.
-  // Re-read when the tab is shown so a change in chrome://extensions/shortcuts lands.
+  // Keep the compose label current after a visit to the browser's shortcut editor.
   window.addEventListener('focus', scheduleShortcutRefresh);
   document.addEventListener('visibilitychange', scheduleShortcutRefresh);
   window.addEventListener('pageshow', (event) => {
@@ -451,10 +414,6 @@ export function contentMain(): void {
     },
   };
 
-  const pageCommandBridge: { deliver: ((command: PageCommandName) => void) | null } = {
-    deliver: null,
-  };
-
   const sessionPromise = (async () => {
     const settings = await loadSettings();
     let liveSettings = settings;
@@ -473,7 +432,6 @@ export function contentMain(): void {
     };
     if (!__SAKUTTO_FAKE_ENGINE__) await readModelStatus();
     shortcutsEnabled = settings.shortcutsEnabled;
-    publishPageShortcut();
     const session = new PageSession(document, {
       engine,
       labels: overlayLabels(),
@@ -490,18 +448,6 @@ export function contentMain(): void {
         liveSettings = { ...liveSettings, translationPopupWidth: width };
         void saveSettings({ translationPopupWidth: width });
       },
-      pageKey: (event) =>
-        listensFor(shortcutSnapshot, shortcutAssigned, shortcutsEnabled, 'translate-page')(event),
-      bilingualKey: (event) =>
-        listensFor(shortcutSnapshot, shortcutAssigned, shortcutsEnabled, 'toggle-bilingual')(event),
-      selectionKey: (event) =>
-        listensFor(
-          shortcutSnapshot,
-          shortcutAssigned,
-          shortcutsEnabled,
-          'translate-selection',
-        )(event),
-      onPageCommand: (command) => pageCommandBridge.deliver?.(command),
     });
     const readiness = composeReadiness(
       settings,
@@ -516,17 +462,8 @@ export function contentMain(): void {
         settings,
         rule,
         readiness,
-        displayShortcut(
-          shortcutFor(shortcutSnapshot, shortcutAssigned, shortcutsEnabled, 'translate-compose'),
-        ),
+        displayShortcut(shortcutFor(shortcutSnapshot, shortcutsEnabled, 'translate-compose')),
       ),
-      composeKey: (event) =>
-        listensFor(
-          shortcutSnapshot,
-          shortcutAssigned,
-          shortcutsEnabled,
-          'translate-compose',
-        )(event),
       onWarm: () => {
         if (!__SAKUTTO_FAKE_ENGINE__) void requestEngineWarm();
       },
@@ -673,7 +610,6 @@ export function contentMain(): void {
       liveRule = nextRule;
       engineSource = liveSettings.engineSource;
       shortcutsEnabled = liveSettings.shortcutsEnabled;
-      publishPageShortcut();
       session.setLabels(overlayLabels());
       session.setPreferences(preferencesFor(liveSettings, liveRule, host));
       const readiness = composeReadiness(
@@ -688,9 +624,7 @@ export function contentMain(): void {
           liveSettings,
           liveRule,
           readiness,
-          displayShortcut(
-            shortcutFor(shortcutSnapshot, shortcutAssigned, shortcutsEnabled, 'translate-compose'),
-          ),
+          displayShortcut(shortcutFor(shortcutSnapshot, shortcutsEnabled, 'translate-compose')),
         ),
       );
       captions?.setLabels(captionLabels());
@@ -763,8 +697,8 @@ export function contentMain(): void {
     const session = await sessionPromise;
     const [liveSettings, liveRule] = await Promise.all([loadSettings(), loadSiteRule(host)]);
     captions?.setPreferences(captionPreferencesFor(liveSettings, liveRule, host));
-    // Keyboard assignment is enforced on the in-page listener and in
-    // `commands.onCommand`. This path also serves the popup and context menu.
+    // Keyboard assignment is enforced by `commands.onCommand`. This path also serves the
+    // popup and context menu.
     if (!__SAKUTTO_FAKE_ENGINE__) {
       void requestEngineWarm();
       void requestEngineTier(session, false, captions);
@@ -786,11 +720,6 @@ export function contentMain(): void {
     await session.handle(command);
     return session.state();
   };
-  pageCommandBridge.deliver = (command) => {
-    const selection = command === 'selection' ? capturePageSelection(document) : null;
-    void run(command, selection);
-  };
-
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (sender.id !== browser.runtime.id) return;
     if (isFolderGrantCompleteMessage(message)) {
@@ -855,14 +784,7 @@ export function contentMain(): void {
             nextSettings,
             nextRule,
             readiness,
-            displayShortcut(
-              shortcutFor(
-                shortcutSnapshot,
-                shortcutAssigned,
-                shortcutsEnabled,
-                'translate-compose',
-              ),
-            ),
+            displayShortcut(shortcutFor(shortcutSnapshot, shortcutsEnabled, 'translate-compose')),
           ),
         );
         let missingAfterRemoval = false;

@@ -307,8 +307,6 @@ export default defineBackground(() => {
     })().catch(() => undefined);
   });
 
-  void recordCommandAssignments();
-
   let warmStarted = false;
 
   async function warmStoredModel(): Promise<void> {

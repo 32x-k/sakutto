@@ -53,11 +53,55 @@ describe('broadcastModelProgress', () => {
     expect(target.pages.map((page) => page.tabId)).toEqual([1, 2]);
   });
 
+  it('tells open pages when the active model is removed', async () => {
+    const target = sink([
+      { id: 1, url: 'https://example.com/a' },
+      { id: 2, url: 'chrome://extensions' },
+    ]);
+
+    await broadcastModelProgress(message('absent'), target);
+
+    expect(target.extension).toHaveLength(1);
+    expect(target.pages).toEqual([{ tabId: 1, message: message('absent') }]);
+  });
+
+  it('tells open pages when a fallback model is ready after deletion', async () => {
+    const target = sink([{ id: 1, url: 'https://example.com/a' }]);
+    await broadcastModelProgress(message('ready'), target);
+    expect(target.extension).toHaveLength(1);
+    expect(target.pages).toEqual([{ tabId: 1, message: message('ready') }]);
+  });
+
+  it('invokes sendExtension for popup-style surfaces that are not extension tabs', async () => {
+    const target = sink([]);
+    const calls: number[] = [];
+    target.sendExtension = async () => {
+      calls.push(1);
+    };
+    await broadcastModelProgress(message('downloading'), target);
+    expect(calls).toHaveLength(1);
+    expect(target.pages).toEqual([]);
+  });
+
   it('keeps download progress on the extension pages', async () => {
     const target = sink([{ id: 1, url: 'https://example.com/a' }]);
     await broadcastModelProgress(message('downloading'), target);
     expect(target.extension).toHaveLength(1);
     expect(target.pages).toEqual([]);
+  });
+
+  it('reaches pages for loading progress outside download and verify', async () => {
+    const target = sink([{ id: 1, url: 'https://example.com/a' }]);
+    await broadcastModelProgress(message('loading'), target);
+    expect(target.extension).toHaveLength(1);
+    expect(target.pages).toEqual([{ tabId: 1, message: message('loading') }]);
+  });
+
+  it('reaches pages for an error state outside download and verify', async () => {
+    const target = sink([{ id: 1, url: 'https://example.com/a' }]);
+    await broadcastModelProgress(message('error'), target);
+    expect(target.extension).toHaveLength(1);
+    expect(target.pages).toEqual([{ tabId: 1, message: message('error') }]);
   });
 
   it('still reaches pages when no extension page is open', async () => {

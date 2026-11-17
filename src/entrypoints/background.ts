@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import { bindPortDisconnectCleanup, readRuntimeLastError } from '@/shared/runtime-last-error';
 import { defineBackground } from 'wxt/utils/define-background';
 import { EngineClient } from '@/background/engine-client';
 import { createEngineHostController } from '@/background/engine-host-document';
@@ -9,6 +10,20 @@ import {
   installPageActions,
   openPdfForTabReason,
 } from '@/background/page-actions';
+import {
+  gatePageCommand,
+  openFolderEnableWindow,
+  resumeFolderGrantPending,
+} from '@/background/folder-grant';
+import { resolveFolderArmCommandTarget } from '@/background/folder-arm-command';
+import {
+  isFolderArmCommandRequest,
+  isFolderGrantCompleteMessage,
+  isFolderOpenEnableRequest,
+  isFolderResumePendingRequest,
+  type FolderGrantCompleteMessage,
+} from '@/shared/folder-grant-messages';
+import { readFolderGrantPending } from '@/shared/folder-grant-pending';
 import { syncCaptionCustomContentScripts } from '@/captions/register-custom';
 import { deleteStoredPdf } from '@/background/pdf-store';
 import {
@@ -19,6 +34,7 @@ import {
   type PdfOpenResult,
 } from '@/shared/pdf';
 import { tabServesPdf } from '@/background/pdf-detect';
+import { sendExtensionModelProgress } from '@/background/extension-progress-sink';
 import { broadcastModelProgress, shouldWarmDownloadedModel } from '@/background/progress-broadcast';
 import { measureQuality } from '@/background/quality';
 import { TranslationBroker } from '@/background/translation-broker';
@@ -46,6 +62,8 @@ import {
   isSiteGrantRequest,
   isModelDeleteRequest,
   isModelDownloadRequest,
+  isModelFolderDeleteOpfsRequest,
+  isModelFolderReloadRequest,
   isModelInspectRequest,
   isModelUseRequest,
   isQualitySampleRequest,
@@ -67,6 +85,16 @@ import {
 
 const CAPABILITIES_CACHE_KEY = 'engineCapabilities';
 
+/** Only top-level extension grant surfaces may announce that a grant finished. */
+function isFolderGrantSurfaceSender(sender: {
+  id?: string | undefined;
+  url?: string | undefined;
+}): boolean {
+  if (sender.id !== browser.runtime.id || typeof sender.url !== 'string') return false;
+  const path = sender.url.split(/[?#]/)[0] ?? '';
+  return path.endsWith('/folder-enable.html') || path.endsWith('/popup.html');
+}
+
 const contentLoadGeneration =
   typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -83,13 +111,18 @@ export default defineBackground(() => {
   });
 
   broker.start();
-  installPageActions(broker);
+  installPageActions(broker, client);
   browser.runtime.onConnect.addListener((port) => {
-    if (port.name !== CONTENT_LIVENESS_PORT) return;
+    if (port.name !== CONTENT_LIVENESS_PORT) {
+      bindPortDisconnectCleanup(port);
+      return;
+    }
+    bindPortDisconnectCleanup(port);
     port.postMessage({
       type: CONTENT_LIVENESS_GENERATION_MESSAGE,
       generation: contentLoadGeneration,
     });
+    readRuntimeLastError();
     port.onMessage.addListener(() => undefined);
   });
   subscribeSettings((settings) => {
@@ -169,12 +202,11 @@ export default defineBackground(() => {
 
   async function broadcast(message: ModelProgressMessage): Promise<void> {
     await broadcastModelProgress(message, {
-      sendExtension: async (item) => {
-        await browser.runtime.sendMessage(item);
-      },
+      sendExtension: sendExtensionModelProgress,
       listTabs: () => browser.tabs.query({}),
       sendTab: async (tabId, item) => {
-        await browser.tabs.sendMessage(tabId, item);
+        await browser.tabs.sendMessage(tabId, item).catch(() => undefined);
+        readRuntimeLastError();
       },
     });
   }
@@ -234,9 +266,19 @@ export default defineBackground(() => {
   }
 
   async function deleteModel(modelId: ModelId) {
+    // Check before removing the file: after deletion the host may already have selected a
+    // fallback model, so only this snapshot says whether page translations used this id.
+    const activeBefore = await client.status().catch(() => null);
+    const removingActiveModel = activeBefore?.model.id === modelId;
+
     downloads.get(modelId)?.abort();
     downloads.delete(modelId);
-    return client.deleteModel(modelId).catch(() => null);
+    if (removingActiveModel) broker.cancelAll();
+
+    const status = await client.deleteModel(modelId).catch(() => null);
+    // A port can open while the host is deleting; close anything that raced the snapshot.
+    if (removingActiveModel) broker.cancelAll();
+    return status;
   }
 
   async function recordCommandAssignments(restoreEmpty = false): Promise<void> {
@@ -392,6 +434,53 @@ export default defineBackground(() => {
       return true;
     }
 
+    if (isFolderOpenEnableRequest(message)) {
+      void openFolderEnableWindow().then(sendResponse);
+      return true;
+    }
+
+    if (isFolderResumePendingRequest(message)) {
+      void resumeFolderGrantPending(client).then(sendResponse);
+      return true;
+    }
+
+    if (isFolderArmCommandRequest(message)) {
+      const target = resolveFolderArmCommandTarget(message, sender);
+      if (!target) {
+        sendResponse(null);
+        return true;
+      }
+      void gatePageCommand(client, target.tabId, target.command, target.frameId).then(sendResponse);
+      return true;
+    }
+
+    if (isFolderGrantCompleteMessage(message)) {
+      if (!isFolderGrantSurfaceSender(sender)) {
+        sendResponse(false);
+        return true;
+      }
+      void (async () => {
+        // Prefer the tab that deferred its command. The iframe sender is a fallback for a
+        // selection grant where no command was pending.
+        const pending = await readFolderGrantPending();
+        const tabId = pending?.tabId ?? sender.tab?.id;
+        if (tabId === undefined) {
+          sendResponse(false);
+          return;
+        }
+        const complete: FolderGrantCompleteMessage = { type: 'folder:grant-complete' };
+        await browser.tabs
+          .sendMessage(
+            tabId,
+            complete,
+            pending?.frameId === undefined ? {} : { frameId: pending.frameId },
+          )
+          .catch(() => undefined);
+        sendResponse(true);
+      })();
+      return true;
+    }
+
     if (isSiteGrantRequest(message)) {
       const origins = grantOriginsFor(sender.tab?.url, message.host);
       if (!origins) {
@@ -501,8 +590,19 @@ export default defineBackground(() => {
 
     if (isModelDeleteRequest(message)) {
       void deleteModel(message.modelId).then(
-        (status) => {
-          if (status) void broadcast({ type: 'model:progress', status });
+        async (status) => {
+          if (status) {
+            await broadcast({ type: 'model:progress', status });
+            if (status.state === 'absent') {
+              const current = await client.status().catch(() => null);
+              if (
+                current &&
+                (current.model.id !== status.id || current.model.state !== status.state)
+              ) {
+                await broadcast({ type: 'model:progress', status: current.model });
+              }
+            }
+          }
           sendResponse(status);
         },
         () => sendResponse(null),
@@ -518,6 +618,16 @@ export default defineBackground(() => {
         },
         () => sendResponse(null),
       );
+      return true;
+    }
+
+    if (isModelFolderReloadRequest(message)) {
+      void client.reloadModelFolder().then(sendResponse, () => sendResponse(null));
+      return true;
+    }
+
+    if (isModelFolderDeleteOpfsRequest(message)) {
+      void client.deleteOpfsCopy(message.modelId).then(sendResponse, () => sendResponse(null));
       return true;
     }
 

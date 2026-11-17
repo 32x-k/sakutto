@@ -33,8 +33,90 @@ describe('start controls while the model downloads', () => {
     expect(onboarding).toContain('onclick={close}');
   });
 
+  it('does not prompt OPFS users to move to a shared folder from the popup', () => {
+    expect(popup).not.toContain('SharedFolderOffer');
+    expect(popup).not.toContain('shouldOfferSharedFolderMove');
+    expect(popup).not.toContain('modelFolderOfferLead');
+    expect(popup).not.toContain('modelFolderOfferOpenSettings');
+    expect(popup).not.toContain('modelFolderOfferLater');
+    expect(source('entrypoints/options/App.svelte')).not.toContain('SharedFolderOffer');
+    expect(source('entrypoints/onboarding/App.svelte')).not.toContain('SharedFolderOffer');
+    expect(source('entrypoints/options/App.svelte')).toContain('ModelFolderSettings');
+  });
+
+  it('records license consent before linking a folder or starting the engine', () => {
+    const start = onboarding.slice(onboarding.indexOf('async function start()'));
+    expect(onboarding).toContain('preparePickedSharedFolder');
+    expect(start).not.toContain('adoptPickedSharedFolder');
+    expect(start.indexOf('saveSettings')).toBeGreaterThan(-1);
+    expect(start.indexOf('saveSettings')).toBeLessThan(start.indexOf('persistSharedFolderHandle'));
+    expect(onboarding).toContain('warm={consentSaved}');
+    expect(onboarding).toContain('(showStartButton && !consentSaved) || Boolean(integrityAlert)');
+    expect(source('ui/ModelFolderSettings.svelte')).toContain('hasLicenseConsent');
+    expect(source('engine/offscreen/host.ts')).toContain('if (!snapshot?.consented)');
+  });
+
+  it('preselects browser storage on onboarding when no folder is already configured', () => {
+    expect(source('ui/onboarding-store.ts')).toContain("return 'browser'");
+    expect(onboarding).toContain('value="browser"');
+    expect(onboarding.indexOf('value="browser"')).toBeLessThan(
+      onboarding.indexOf('value="folder"'),
+    );
+    expect(onboarding).toContain('data-store-recommended');
+    expect(onboarding).toContain('onboardingStoreFolderHelp');
+  });
+
+  it('handles translator pack failures and skips unnecessary installs', () => {
+    expect(onboarding).toContain('shouldPrepareTranslatorPack');
+    expect(onboarding).toContain('void pack?.catch(() => undefined)');
+    expect(onboarding).not.toContain('void pack;');
+    expect(source('shared/translator-pack.ts')).toContain(
+      'installPack(translator, pair, key, options).catch',
+    );
+  });
+
+  it('does not offer a download when the shared folder needs permission again', () => {
+    expect(modelManager).toContain('sharedFolderNeedsPermission');
+    expect(typed).toContain('sharedFolderNeedsUserAction');
+    expect(typed).not.toContain('folderBlocked');
+    expect(typed).toContain('folderNeedsAction');
+    expect(typed).toContain('FolderPermissionRestore');
+    expect(popup).not.toContain('FolderPermissionRestore');
+    expect(popup).toContain('shouldShowModelDownloadGate');
+    expect(popup).toContain('showDownloadGate');
+    expect(popup).not.toMatch(/\{#if !canStart\}/);
+    expect(source('entrypoints/onboarding/App.svelte')).toContain('FolderPermissionRestore');
+    expect(source('entrypoints/onboarding/App.svelte')).toContain('FOLDER_PERMISSION_ERROR');
+    expect(source('ui/FolderPermissionRestore.svelte')).toContain('modelFolderPermissionGrant');
+    expect(source('ui/FolderPermissionRestore.svelte')).toContain('modelFolderPermissionPresent');
+    expect(source('ui/FolderPermissionRestore.svelte')).not.toContain(
+      'canAttemptSilentFolderGrant',
+    );
+    expect(source('ui/FolderPermissionRestore.svelte')).toContain('checkingPermission');
+    expect(source('ui/FolderPermissionRestore.svelte')).not.toContain('silentGrantFailed');
+  });
+
   it('keeps the cancel control visible while verifying', () => {
     expect(modelManager).toMatch(/downloading \|\| verifying[\s\S]{0,800}downloadCancel/);
+  });
+
+  it('offers the one-time model file import on settings and Firefox onboarding', () => {
+    const tools = source('ui/ModelFileTools.svelte');
+    expect(tools).toContain('accept=".gguf"');
+    expect(tools).toContain('importModelFile');
+    expect(tools).toContain('exportModelFile');
+    expect(tools).not.toMatch(/\{#if done\}[\s\S]{0,200}\{:else if exporting\}/);
+    expect(tools).toMatch(/async function exportFile\(\)[\s\S]{0,160}done = false/);
+    expect(source('entrypoints/options/App.svelte')).toContain('ModelFileTools');
+    expect(onboarding).toMatch(/\{#if !sharedFolderSupported\(\)\}[\s\S]{0,200}<ModelFileTools/);
+    expect(source('ui/ModelFolderSettings.svelte')).toContain('modelFolderLocationHint');
+  });
+
+  it('never asks for folder permission from the engine host or a content script', () => {
+    expect(source('engine/offscreen/host.ts')).not.toContain('requestFolderPermission');
+    expect(source('engine/offscreen/host.ts')).not.toContain('requestPermission');
+    expect(source('entrypoints/content.ts')).not.toContain('requestPermission');
+    expect(source('engine/model/folder-session.ts')).not.toContain('requestPermission(');
   });
 
   it('does not offer a download button for a model that is already loading', () => {
@@ -338,6 +420,158 @@ describe('local server settings', () => {
     expect(panel).toContain('permissionDenied && !local');
     expect(panel).toContain("t('localServerPermissionDenied')");
     expect(panel).toContain('role="alert"');
+  });
+});
+
+describe('shared folder activation and recovery', () => {
+  const options = source('entrypoints/options/App.svelte');
+  const folderSettings = source('ui/ModelFolderSettings.svelte');
+  const restore = source('ui/FolderPermissionRestore.svelte');
+  const fileTools = source('ui/ModelFileTools.svelte');
+  const pageBridge = source('shared/page-bridge.ts');
+
+  it('silently re-grants from the click before it starts slow work', () => {
+    const translateStart = popup.indexOf('async function translatePage()');
+    const translateEnd = popup.indexOf('/**', translateStart + 1);
+    const translateBody = popup.slice(translateStart, translateEnd);
+    expect(translateBody.indexOf('ensureFolderPermissionForAction')).toBeGreaterThan(-1);
+    expect(translateBody.indexOf('ensureFolderPermissionForAction')).toBeLessThan(
+      translateBody.indexOf('ensureContentScript'),
+    );
+    expect(folderSettings).not.toContain('ensureStoredFolderPermission');
+    expect(onboarding).toContain('ensureStoredFolderPermission');
+    expect(source('ui/ModelManager.svelte')).toContain('ensureStoredFolderPermission');
+  });
+
+  it('opens the folder picker before reloading the host on settings', () => {
+    const chooseStart = folderSettings.indexOf('async function chooseFolder');
+    const chooseBody = folderSettings.slice(
+      chooseStart,
+      folderSettings.indexOf('async function stopUsing', chooseStart),
+    );
+    expect(chooseBody.indexOf('loadSettings')).toBeLessThan(
+      chooseBody.indexOf('adoptPickedSharedFolder'),
+    );
+    expect(chooseBody.indexOf('adoptPickedSharedFolder')).toBeLessThan(
+      chooseBody.indexOf('reloadHost'),
+    );
+    expect(chooseBody.slice(0, chooseBody.indexOf('adoptPickedSharedFolder'))).not.toContain(
+      'reloadHost',
+    );
+    expect(chooseBody.slice(0, chooseBody.indexOf('adoptPickedSharedFolder'))).not.toContain(
+      'ensureStoredFolderPermission',
+    );
+    expect(chooseBody.indexOf('requestEngineWarm')).toBeGreaterThan(
+      chooseBody.indexOf('reloadHost'),
+    );
+  });
+
+  it('does not offer to delete a browser copy that is the only known copy', () => {
+    expect(folderSettings).toContain('canDeleteBrowserCopy');
+    expect(folderSettings).toContain('{#if canDeleteBrowserCopy(folder, id)}');
+    expect(source('engine/model/folder-status.ts')).toContain(
+      'export function canDeleteBrowserCopy',
+    );
+    expect(source('engine/offscreen/host.ts')).toContain(
+      '!canDeleteBrowserCopy(current, request.modelId)',
+    );
+  });
+
+  it('does not render a restore card in the toolbar popup', () => {
+    expect(popup).toContain('refreshEngineOnOpen');
+    expect(popup).not.toContain('settleFolderPermissionOnOpen');
+    expect(popup).not.toContain('FolderPermissionRestore');
+    expect(popup).not.toContain('autoSettle={false}');
+    expect(popup).not.toContain('ensureStoredFolderPermission');
+    expect(popup).toContain('ensureFolderPermissionForAction');
+  });
+
+  it('restore cards only query and open the grant tab', () => {
+    expect(restore).toContain('autoSettle');
+    expect(restore).toContain('activationFailed');
+    expect(restore).toContain('queryStoredFolderPermission');
+    expect(restore).not.toContain('canAttemptSilentFolderGrant');
+    expect(restore).not.toContain('ensureStoredFolderPermission');
+    expect(restore).toContain("type: 'folder:open-enable'");
+    expect(restore).not.toContain('probeStoredFolderReadable');
+  });
+
+  it('does not toast for a folder grant when OPFS can still answer', () => {
+    const content = source('content/main.ts');
+    const arm = source('content/folder-arm-gate.ts');
+    expect(content).toContain('armFolderCommand');
+    expect(content).not.toContain('browser.tabs');
+    expect(content).not.toContain('getCurrent');
+    expect(arm).toContain("type: 'folder:arm-command'");
+    expect(arm).not.toContain('tabId');
+    expect(content).toContain('isFolderGrantCompleteMessage');
+    expect(content).not.toContain('folder-enable.html');
+    expect(content).not.toContain('requestPermission');
+    expect(content).not.toContain('sakutto-folder-granted');
+    expect(content).not.toContain('folderNeedsPermission = sharedFolderNeedsPermission');
+    expect(source('background/folder-grant.ts')).toContain('sharedFolderNeedsUserAction');
+    expect(source('entrypoints/sample/main.ts')).toContain('sharedFolderNeedsUserAction');
+  });
+
+  it('keeps translate available for OPFS installs without a configured folder', () => {
+    const start = popup.indexOf('async function ensureFolderPermissionForAction');
+    const body = popup.slice(start, popup.indexOf('async function translatePage', start));
+    expect(body).toContain('queryStoredFolderPermission');
+    expect(body).toContain('allowed: true');
+    expect(body).toContain('requestResumeFolderGrantPending');
+    expect(body).not.toContain('ensureStoredFolderPermission');
+    expect(popup).toContain('access.resumed');
+  });
+
+  it('does not repeat the picker hint after a cancelled folder pick', () => {
+    const chooseStart = folderSettings.indexOf('async function chooseFolder');
+    const chooseBody = folderSettings.slice(
+      chooseStart,
+      folderSettings.indexOf('async function stopUsing', chooseStart),
+    );
+    expect(chooseBody).toContain("if (picked.status === 'cancelled') return;");
+    expect(folderSettings).not.toContain('data-folder-picker-hint');
+    const start = onboarding.indexOf('async function start()');
+    const startBody = onboarding.slice(start, onboarding.indexOf('async function pause', start));
+    expect(startBody).toContain("if (prepared.status === 'cancelled') return;");
+    expect(onboarding).not.toContain('data-folder-picker-hint');
+  });
+
+  it('reuses one onboarding tab instead of adding one per settings click', () => {
+    expect(folderSettings).toContain('openOrFocusExtensionTab');
+    expect(folderSettings).not.toContain('browser.tabs.create');
+    expect(source('ui/ModelManager.svelte')).toContain('openOrFocusExtensionTab');
+    expect(options).toContain('openOrFocusExtensionTab');
+  });
+
+  it('offers download, import, and a folder choice after the shared folder is stopped', () => {
+    expect(popup).toContain('modelNeedsDownload');
+    expect(popup).toContain('sharedFolderSettingsHref');
+    expect(popup).toContain('popup-model-download');
+    expect(popup).toContain('popup-model-import');
+    expect(popup).toContain('popup-model-folder');
+    expect(popup).toContain("t('modelDownload')");
+    expect(popup).toContain("t('modelImportChoose')");
+    expect(popup).toContain("t('modelFolderChoose')");
+    expect(popup).toMatch(/!folderNeedsPermission && !modelNeedsInstall/);
+  });
+
+  it('clears the Firefox export notice before a failed import and after it starts', () => {
+    const importStart = fileTools.indexOf('async function importFile');
+    const importBody = fileTools.slice(
+      importStart,
+      fileTools.indexOf('async function onFileChosen'),
+    );
+    expect(importBody.indexOf('clearExportNotice')).toBeLessThan(
+      importBody.indexOf("endsWith('.gguf')"),
+    );
+    expect(fileTools).toContain('EXPORT_NOTICE_MS');
+    expect(fileTools).toContain('showExportNotice');
+  });
+
+  it('retries content injection for a tab that has just reloaded', () => {
+    expect(pageBridge).toContain('CONTENT_SCRIPT_RETRY_DELAYS_MS');
+    expect(pageBridge).toContain('injectContentScript');
   });
 });
 

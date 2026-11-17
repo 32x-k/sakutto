@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_MODEL_ID } from '@/engine/model/catalog';
+import {
+  canDeleteBrowserCopy,
+  folderRecordsModel,
+  sharedFolderNeedsPermission,
+} from '@/engine/model/folder-status';
 import type { ModelStatus } from '@/shared/engine-status';
 import {
   modelCanTranslate,
+  modelNeedsDownload,
   modelStartBlocked,
+  sharedFolderNeedsUserAction,
+  shouldShowModelDownloadGate,
   translationStartBlocked,
 } from '@/shared/engine-status';
 
@@ -85,5 +93,152 @@ describe('model availability', () => {
         engineSource: 'in-browser',
       }),
     ).toBe(true);
+  });
+
+  it('only offers browser-copy deletion when the folder copy is known', () => {
+    expect(
+      canDeleteBrowserCopy(
+        { configured: true, permission: 'granted', recordedModels: [] },
+        DEFAULT_MODEL_ID,
+      ),
+    ).toBe(true);
+    expect(
+      canDeleteBrowserCopy(
+        { configured: true, permission: 'prompt', recordedModels: [DEFAULT_MODEL_ID] },
+        DEFAULT_MODEL_ID,
+      ),
+    ).toBe(true);
+    expect(
+      canDeleteBrowserCopy(
+        { configured: true, permission: 'prompt', recordedModels: [] },
+        DEFAULT_MODEL_ID,
+      ),
+    ).toBe(false);
+    expect(canDeleteBrowserCopy(undefined, DEFAULT_MODEL_ID)).toBe(true);
+  });
+
+  it('treats a configured shared folder without access as permission-needed, not a missing file', () => {
+    expect(sharedFolderNeedsPermission({ configured: true, permission: 'prompt' })).toBe(true);
+    expect(sharedFolderNeedsPermission({ configured: true, permission: 'denied' })).toBe(true);
+    expect(sharedFolderNeedsPermission({ configured: true, permission: 'granted' })).toBe(false);
+    expect(sharedFolderNeedsPermission({ configured: false, permission: 'unknown' })).toBe(false);
+    expect(sharedFolderNeedsPermission(undefined)).toBe(false);
+  });
+
+  it('offers recovery only when no downloaded file can answer', () => {
+    const base = {
+      id: DEFAULT_MODEL_ID,
+      received: 0,
+      total: 1,
+      progress: 0,
+    };
+    for (const state of ['absent', 'partial'] as const) {
+      expect(modelNeedsDownload({ model: { ...base, state } }), state).toBe(true);
+    }
+    for (const state of [
+      'downloading',
+      'verifying',
+      'ready',
+      'loading',
+      'loaded',
+      'error',
+    ] as const) {
+      expect(modelNeedsDownload({ model: { ...base, state } }), state).toBe(false);
+    }
+    expect(
+      modelNeedsDownload({
+        model: { ...base, state: 'error', error: 'model-folder-permission' },
+      }),
+    ).toBe(false);
+    expect(
+      modelNeedsDownload({
+        engineSource: 'local-server',
+        model: { ...base, state: 'absent' },
+      }),
+    ).toBe(false);
+    expect(
+      modelNeedsDownload({
+        model: { ...base, state: 'absent' },
+        sharedFolder: {
+          supported: true,
+          configured: true,
+          permission: 'prompt',
+          opfsCopies: [],
+          integrityIssues: [],
+        },
+      }),
+    ).toBe(false);
+  });
+
+  it('does not ask for folder access when OPFS or a ready model can answer', () => {
+    const folder = {
+      supported: true,
+      configured: true,
+      permission: 'prompt' as const,
+      opfsCopies: [DEFAULT_MODEL_ID],
+      integrityIssues: [],
+      recordedModels: [DEFAULT_MODEL_ID],
+    };
+    const model = {
+      id: DEFAULT_MODEL_ID,
+      received: 0,
+      total: 1,
+      progress: 0,
+    };
+    expect(
+      sharedFolderNeedsUserAction({
+        model: { ...model, state: 'ready' },
+        sharedFolder: { ...folder, opfsCopies: [] },
+      }),
+    ).toBe(false);
+    expect(
+      sharedFolderNeedsUserAction({
+        model: { ...model, state: 'absent' },
+        sharedFolder: folder,
+      }),
+    ).toBe(false);
+    expect(
+      sharedFolderNeedsUserAction({
+        model: { ...model, state: 'loading' },
+        sharedFolder: { ...folder, opfsCopies: [] },
+      }),
+    ).toBe(false);
+    expect(
+      sharedFolderNeedsUserAction({
+        model: { ...model, state: 'absent' },
+        sharedFolder: { ...folder, opfsCopies: [] },
+      }),
+    ).toBe(true);
+    expect(
+      sharedFolderNeedsUserAction({
+        model: { ...model, state: 'absent' },
+        sharedFolder: { ...folder, permission: 'granted' },
+      }),
+    ).toBe(false);
+  });
+
+  it('hides the download gate when the shared folder only needs permission', () => {
+    const absent = {
+      model: {
+        id: DEFAULT_MODEL_ID,
+        state: 'error' as const,
+        received: 0,
+        total: 1,
+        progress: 0,
+        error: 'model-folder-permission',
+      },
+      sharedFolder: {
+        supported: true,
+        configured: true,
+        permission: 'prompt' as const,
+        opfsCopies: [],
+        integrityIssues: [],
+        recordedModels: [DEFAULT_MODEL_ID],
+      },
+    };
+    expect(shouldShowModelDownloadGate(absent)).toBe(false);
+    expect(translationStartBlocked(absent)).toBe(true);
+    expect(folderRecordsModel(absent.sharedFolder, DEFAULT_MODEL_ID)).toBe(true);
+    expect(folderRecordsModel(absent.sharedFolder, 'plamo-3-translate-2b-q4_k_m')).toBe(false);
   });
 });

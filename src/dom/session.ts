@@ -14,9 +14,15 @@ import { DEFAULT_BATCHING } from '@/engine/text/plan';
 import { chunkForTranslation, joinTranslatedSentences } from '@/engine/text/sentences';
 import { isPlainAltS } from '@/shared/shortcuts';
 import { PriorityQueue } from '@/engine/queue/priority-queue';
-import { isAbortError, isLocalServerError, isModelChangedError } from '@/engine/errors';
+import {
+  isAbortError,
+  isFolderPermissionError,
+  isLocalServerError,
+  isModelChangedError,
+} from '@/engine/errors';
 import type { EngineKind, GlossaryEntry, TranslateOptions, TranslationChunk } from '@/engine/types';
 import { glossaryKey, mergeGlossary } from '@/shared/glossary';
+import type { PageCommandName } from '@/shared/messages';
 import {
   chooseTargetLanguage,
   effectivePageTarget,
@@ -202,6 +208,36 @@ interface InflightBatch {
   streaming: boolean;
 }
 
+export interface PageSelectionSnapshot {
+  text: string;
+  rect: DOMRect;
+}
+
+/** Capture a document selection now; later awaits must not depend on it still existing. */
+export function capturePageSelection(
+  doc: Document,
+  isOwnUi: (node: Node) => boolean = () => false,
+): PageSelectionSnapshot | null {
+  for (const current of collectDocuments(doc)) {
+    const selection = current.getSelection?.() ?? current.defaultView?.getSelection() ?? null;
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) continue;
+    const text = selection.toString().trim();
+    if (text.length === 0 || !hasTranslatableText(text)) continue;
+    const endpoint = selection.anchorNode ?? selection.focusNode;
+    if (endpoint && isOwnUi(endpoint)) continue;
+    // A field the reader is typing in reports its value as the document selection.
+    if (isTypedTextSelection(current.activeElement, text)) continue;
+    let range: Range;
+    try {
+      range = selection.getRangeAt(0);
+    } catch {
+      continue;
+    }
+    return { text, rect: selectionViewportRect(range, current, doc) };
+  }
+  return null;
+}
+
 export interface PageSessionOptions {
   engine: PageEngine;
   labels: OverlayLabels;
@@ -224,8 +260,17 @@ export interface PageSessionOptions {
   pageKey?: (event: KeyboardEvent) => boolean;
   /** Bilingual toggle. Used when Chrome left that command unbound. */
   bilingualKey?: (event: KeyboardEvent) => boolean;
+  /**
+   * Runs page commands from in-page shortcuts with the same gating and deduplication as
+   * `commands.onCommand`. Without this, Alt+A and a Chrome command can both call `handle`.
+   */
+  onPageCommand?: (command: PageCommandName) => void;
   /** Saves a width chosen by dragging or keyboard, in em at 100% text scale. */
   onPopupWidth?: (widthEm: number) => void | Promise<void>;
+  /** True only while the shared folder grant actually needs the reader to act. */
+  folderGrantUiActive?: boolean;
+  /** Opens the toolbar popup or a top-level grant window from the in-page hint. */
+  onFolderEnable?: () => void;
 }
 
 export function preferencesFor(
@@ -266,6 +311,7 @@ export class PageSession {
   private readonly selectionKey: (event: KeyboardEvent) => boolean;
   private readonly pageKey: ((event: KeyboardEvent) => boolean) | undefined;
   private readonly bilingualKey: ((event: KeyboardEvent) => boolean) | undefined;
+  private readonly onPageCommand: ((command: PageCommandName) => void) | undefined;
   private readonly keyWindows = new Set<Window>();
   private grantPending = false;
   private eagerOnce = true;
@@ -314,6 +360,12 @@ export class PageSession {
   private applying = 0;
   /** Set when a local-server request fails, so the bar can keep the Settings hint. */
   private serverFault = false;
+  private folderPermissionFault = false;
+  /** Set when the active model is deleted, so the bar stops counting unfinished work. */
+  private modelMissingFault = false;
+  private folderGrantUiActive: boolean;
+  private readonly onFolderEnable: (() => void) | undefined;
+  private selectionGrantTimer: ReturnType<typeof setTimeout> | null = null;
   private historyUnpatch: (() => void) | null = null;
   private scanTimer: ReturnType<typeof setTimeout> | null = null;
   private direction: 'down' | 'up' = 'down';
@@ -334,6 +386,7 @@ export class PageSession {
   private readonly onVisibility: () => void;
   private readonly onScroll: () => void;
   private readonly onPageHide: () => void;
+  private readonly onPageShow: (event: PageTransitionEvent) => void;
   private readonly onPopState: () => void;
   private readonly onPointerOver: (event: Event) => void;
   private readonly onPointerOut: (event: Event) => void;
@@ -361,6 +414,9 @@ export class PageSession {
     this.selectionKey = options.selectionKey ?? isPlainAltS;
     this.pageKey = options.pageKey;
     this.bilingualKey = options.bilingualKey;
+    this.onPageCommand = options.onPageCommand;
+    this.folderGrantUiActive = options.folderGrantUiActive === true;
+    this.onFolderEnable = options.onFolderEnable;
     this.scheduleFrame =
       options.scheduleFrame ??
       ((callback) => {
@@ -411,6 +467,11 @@ export class PageSession {
     this.onPageHide = () => {
       this.stopForNavigation();
     };
+    this.onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      this.navigating = false;
+      if (this.active) this.scheduleScan();
+    };
     this.onPopState = () => {
       if (!this.active) return;
       this.invalidatePaints();
@@ -459,14 +520,16 @@ export class PageSession {
         if (isTypingShortcutTarget(event)) return;
         event.preventDefault();
         event.stopPropagation();
-        void this.handle('toggle');
+        if (this.onPageCommand) this.onPageCommand('toggle');
+        else void this.handle('toggle');
         return;
       }
       if (this.bilingualKey?.(event)) {
         if (isTypingShortcutTarget(event)) return;
         event.preventDefault();
         event.stopPropagation();
-        void this.handle('bilingual');
+        if (this.onPageCommand) this.onPageCommand('bilingual');
+        else void this.handle('bilingual');
         return;
       }
       if (!this.selectionKey(event)) return;
@@ -488,6 +551,7 @@ export class PageSession {
     this.doc.addEventListener('scroll', this.onScroll, { capture: true, passive: true });
     this.doc.defaultView?.addEventListener('scroll', this.onScroll, { passive: true });
     this.doc.defaultView?.addEventListener('pagehide', this.onPageHide);
+    this.doc.defaultView?.addEventListener('pageshow', this.onPageShow);
     this.doc.defaultView?.addEventListener('popstate', this.onPopState);
     this.doc.defaultView?.addEventListener('resize', this.onResize);
     this.bindHistory();
@@ -502,6 +566,23 @@ export class PageSession {
   setLabels(labels: OverlayLabels): void {
     this.labels = labels;
     this.overlay.setLabels(labels);
+  }
+
+  /** Called when the engine status says whether the shared folder grant needs action. */
+  setFolderGrantUiActive(active: boolean): void {
+    if (this.folderGrantUiActive === active) return;
+    this.folderGrantUiActive = active;
+    if (active) {
+      this.publishState();
+      return;
+    }
+    this.folderPermissionFault = false;
+    if (this.selectionGrantTimer !== null) {
+      clearTimeout(this.selectionGrantTimer);
+      this.selectionGrantTimer = null;
+    }
+    this.overlay.hideFolderEnable();
+    this.publishState();
   }
 
   setPreferences(next: SessionPreferences): void {
@@ -623,6 +704,8 @@ export class PageSession {
     if (this.active) return;
     this.active = true;
     this.serverFault = false;
+    this.folderPermissionFault = false;
+    this.modelMissingFault = false;
     this.navigating = false;
     this.sweepLegacyNotes();
     this.startedAt = performance.now();
@@ -647,6 +730,9 @@ export class PageSession {
   restore(): void {
     this.active = false;
     this.serverFault = false;
+    this.folderPermissionFault = false;
+    this.modelMissingFault = false;
+    this.overlay.hideFolderEnable();
     this.targetAdjusted = false;
     const source = this.doc.documentElement.getAttribute('data-sakutto-source-lang');
     if (source !== null) {
@@ -734,6 +820,18 @@ export class PageSession {
     }
     this.enqueue(next, true);
     this.pump();
+    if (reveal && this.folderGrantUiActive) {
+      if (this.selectionGrantTimer !== null) clearTimeout(this.selectionGrantTimer);
+      this.selectionGrantTimer = setTimeout(() => {
+        this.selectionGrantTimer = null;
+        if (!this.folderGrantUiActive) return;
+        const current = this.selection;
+        if (!current || current.state === 'done') return;
+        if (current.translation.trim().length > 0) return;
+        if (current.state !== 'queued' && current.state !== 'running') return;
+        this.beginFolderGrantWait();
+      }, 12_000);
+    }
   }
 
   translateDocumentSelection(): void {
@@ -742,25 +840,8 @@ export class PageSession {
     this.translateSelection(selected.text, selected.rect);
   }
 
-  private readSelection(): { text: string; rect: DOMRect } | null {
-    for (const doc of collectDocuments(this.doc)) {
-      const selection = doc.getSelection?.() ?? doc.defaultView?.getSelection() ?? null;
-      if (!selection || selection.isCollapsed || selection.rangeCount === 0) continue;
-      const text = selection.toString().trim();
-      if (text.length === 0 || !hasTranslatableText(text)) continue;
-      const endpoint = selection.anchorNode ?? selection.focusNode;
-      if (endpoint && this.overlay.contains(endpoint)) continue;
-      // A field the reader is typing in reports its value as the document selection.
-      if (isTypedTextSelection(doc.activeElement, text)) continue;
-      let range: Range;
-      try {
-        range = selection.getRangeAt(0);
-      } catch {
-        continue;
-      }
-      return { text, rect: selectionViewportRect(range, doc, this.doc) };
-    }
-    return null;
+  private readSelection(): PageSelectionSnapshot | null {
+    return capturePageSelection(this.doc, (node) => this.overlay.contains(node));
   }
 
   /**
@@ -878,7 +959,66 @@ export class PageSession {
    * model is ready those blocks are queued again; nothing was painted in their place, so
    * there is no draft to replace — only missing text to translate.
    */
+  noteFolderPermission(): void {
+    this.folderPermissionFault = true;
+    this.beginFolderGrantWait();
+  }
+
+  /**
+   * The active model file was deleted while this page was translating. Abort every batch and
+   * retire queued work so the bar cannot keep counting blocks that can never finish, then
+   * leave a short no-model message in its place.
+   */
+  noteModelMissing(): void {
+    if (!this.active) return;
+    this.modelMissingFault = true;
+    this.pageController?.abort();
+    this.pageController = null;
+    this.queue.clear();
+    this.abortRunning(false);
+    // Queued items were removed from the queue but still hold their old state. Retire them
+    // too, otherwise the view keeps counting work that will never start.
+    for (const item of this.live.values()) {
+      if (item.state !== 'queued') continue;
+      item.state = 'idle';
+      item.partText = [];
+      item.partFinal = [];
+      item.partError = [];
+      item.model?.block.removeAttribute('data-sakutto-pending');
+    }
+    this.selection = null;
+    this.selectionShown = false;
+    this.clearSelectionOffer();
+    this.overlay.hideSelection();
+    this.overlay.hideSelectionIcon();
+    this.overlay.hideOriginal();
+    this.publishState();
+  }
+
+  beginFolderGrantWait(): void {
+    if (!this.folderGrantUiActive || this.overlay.folderEnableVisible()) return;
+    this.overlay.showFolderEnable(this.onFolderEnable);
+    if (this.selectionShown) {
+      this.overlay.hideSelection();
+      this.selectionShown = false;
+    }
+    this.publishState();
+  }
+
+  endFolderGrantWait(): void {
+    this.folderPermissionFault = false;
+    this.overlay.hideFolderEnable();
+    if (this.selectionGrantTimer !== null) {
+      clearTimeout(this.selectionGrantTimer);
+      this.selectionGrantTimer = null;
+    }
+    this.retryUntranslated();
+    this.publishState();
+  }
+
   retryUntranslated(): void {
+    this.folderPermissionFault = false;
+    this.modelMissingFault = false;
     if (!this.active) return;
     for (const item of this.live.values()) {
       if (item.role !== 'page' || item.state === 'running') continue;
@@ -913,6 +1053,7 @@ export class PageSession {
     this.doc.defaultView?.removeEventListener('scroll', this.onScroll);
     this.unbindKeys();
     this.doc.defaultView?.removeEventListener('pagehide', this.onPageHide);
+    this.doc.defaultView?.removeEventListener('pageshow', this.onPageShow);
     this.doc.defaultView?.removeEventListener('popstate', this.onPopState);
     this.doc.defaultView?.removeEventListener('resize', this.onResize);
     this.overlay.destroy();
@@ -1123,6 +1264,7 @@ export class PageSession {
   }
 
   private enqueue(item: Live, force = false): void {
+    if (this.modelMissingFault) return;
     if (item.state === 'running') return;
     if (item.state === 'queued') {
       if (!force) return;
@@ -1175,6 +1317,10 @@ export class PageSession {
   }
 
   private pump(): void {
+    if (this.modelMissingFault) {
+      this.resolveIdle();
+      return;
+    }
     if (this.navigating) {
       this.resolveIdle();
       return;
@@ -1373,6 +1519,8 @@ export class PageSession {
       } else if (!signal.aborted && isLocalServerError(error)) {
         this.serverFault = true;
         if (this.labels.engineFailed) this.overlay.showStatus(this.labels.engineFailed);
+      } else if (!signal.aborted && isFolderPermissionError(error)) {
+        this.noteFolderPermission();
       }
     } finally {
       this.work.engineMs += Math.round(performance.now() - engineStarted);
@@ -1401,6 +1549,14 @@ export class PageSession {
           item.state = item.translation.length > 0 ? 'done' : 'idle';
           item.model?.block.removeAttribute('data-sakutto-pending');
           this.showSelectionFailure(item, signal);
+          continue;
+        }
+        if (this.folderPermissionFault) {
+          item.state = 'idle';
+          item.model?.block.removeAttribute('data-sakutto-pending');
+          if (item.role === 'selection' && item === this.selection) {
+            this.beginFolderGrantWait();
+          }
           continue;
         }
         if (item.partFinal.length > 0 && item.partFinal.every(Boolean)) {
@@ -1929,6 +2085,11 @@ export class PageSession {
   }
 
   private barText(view: PageViewState): string {
+    if (this.modelMissingFault) return this.labels.modelMissing ?? this.labels.barLabel;
+    if (this.folderPermissionFault && view.pending === 0) {
+      if (!this.overlay.folderEnableVisible()) this.beginFolderGrantWait();
+      return this.labels.barLabel;
+    }
     if (this.serverFault && this.labels.engineFailed && view.pending === 0) {
       return this.labels.engineFailed;
     }

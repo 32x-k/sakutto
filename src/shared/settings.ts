@@ -274,6 +274,11 @@ export interface Settings {
   plainTextLineBreaks: PlainTextLineBreakMode;
   consent: LicenseConsent | null;
   highQualityDismissed: boolean;
+  /**
+   * Kept so stored profiles still load. The popup no longer offers a move to a
+   * shared folder; Settings is the only place to opt in.
+   */
+  sharedFolderOfferDismissed: boolean;
   glossary: GlossaryEntry[];
   idleMinutes: IdleMinutes;
   tier: TierPreference;
@@ -360,6 +365,7 @@ export type SettingsPatch = Partial<
     | 'plainTextLineBreaks'
     | 'consent'
     | 'highQualityDismissed'
+    | 'sharedFolderOfferDismissed'
     | 'glossary'
     | 'idleMinutes'
     | 'tier'
@@ -401,6 +407,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   plainTextLineBreaks: 'none',
   consent: null,
   highQualityDismissed: false,
+  sharedFolderOfferDismissed: false,
   glossary: [],
   idleMinutes: 5,
   tier: 'auto',
@@ -468,6 +475,7 @@ export function normalizeSettings(value: unknown, uiLanguage: string): Settings 
     plainTextLineBreaks: normalizePlainTextLineBreaks(value.plainTextLineBreaks),
     consent: normalizeConsent(value.consent),
     highQualityDismissed: value.highQualityDismissed === true,
+    sharedFolderOfferDismissed: value.sharedFolderOfferDismissed === true,
     glossary: normalizeGlossary(value.glossary),
     idleMinutes: isIdleMinutes(value.idleMinutes) ? value.idleMinutes : defaults.idleMinutes,
     tier: isTierPreference(value.tier) ? value.tier : defaults.tier,

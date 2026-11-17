@@ -67,6 +67,10 @@ export default defineConfig({
         48: 'icon/48.png',
         128: 'icon/128.png',
       },
+      // folder-enable.html is opened only as a top-level extension tab (tabs.create). It must
+      // not appear in web_accessible_resources with use_dynamic_url, or Chrome blocks the static
+      // runtime.getURL() used for that tab (ERR_BLOCKED_BY_CLIENT).
+      web_accessible_resources: [],
     };
   },
 });

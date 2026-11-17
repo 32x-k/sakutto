@@ -1,4 +1,6 @@
-import { browser } from 'wxt/browser';
+import { browser, type Browser } from 'wxt/browser';
+import { registerContentPortReconnect, trackContentPort } from './content-port-lifecycle';
+import { readRuntimeLastError } from './runtime-last-error';
 
 /** Written on `document.documentElement` so a reloaded build can claim the page from an orphan script. */
 export const CONTENT_INSTANCE_DOC_ATTR = 'data-sakutto-extension-instance';
@@ -161,9 +163,11 @@ export interface ContentInvalidationCleanupOptions {
 export function installContentInvalidationCleanup(
   onInvalidate: () => void,
   options: ContentInvalidationCleanupOptions = {},
-): void {
+): () => void {
   let tornDown = false;
   let reconnectAttempt = 0;
+  let port: Browser.runtime.Port | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   const baseDelay = options.initialReconnectMs ?? 500;
 
   const teardown = (): void => {
@@ -172,38 +176,84 @@ export function installContentInvalidationCleanup(
     onInvalidate();
   };
 
+  const scheduleReconnect = (): void => {
+    if (tornDown || reconnectTimer !== null) return;
+    const delay = Math.min(30_000, baseDelay * 2 ** reconnectAttempt);
+    reconnectAttempt += 1;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      connect();
+    }, delay);
+  };
+
   const connect = (): void => {
-    if (tornDown) return;
+    if (tornDown || port) return;
     try {
-      const port = browser.runtime.connect({ name: CONTENT_LIVENESS_PORT });
+      const next = browser.runtime.connect({ name: CONTENT_LIVENESS_PORT });
+      port = next;
       reconnectAttempt = 0;
-      port.onMessage.addListener((message: unknown) => {
+      const untrack = trackContentPort(next, () => {
+        if (port === next) port = null;
+      });
+      next.onMessage.addListener((message: unknown) => {
         if (isContentLoadGenerationMessage(message)) {
           applyContentLoadGeneration(message.generation);
         }
       });
-      port.onDisconnect.addListener(() => {
+      next.onDisconnect.addListener(() => {
+        readRuntimeLastError();
+        queueMicrotask(() => readRuntimeLastError());
+        const invalidated = isExtensionContextInvalidated();
+        untrack();
+        if (port === next) port = null;
+        else return;
         if (tornDown) return;
-        if (isExtensionContextInvalidated()) {
+        if (invalidated) {
           teardown();
           return;
         }
-        const delay = Math.min(30_000, baseDelay * 2 ** reconnectAttempt);
-        reconnectAttempt += 1;
-        setTimeout(connect, delay);
+        scheduleReconnect();
       });
     } catch {
-      if (isExtensionContextInvalidated()) {
+      port = null;
+      const invalidated = isExtensionContextInvalidated();
+      readRuntimeLastError();
+      if (invalidated) {
         teardown();
         return;
       }
-      const delay = Math.min(30_000, baseDelay * 2 ** reconnectAttempt);
-      reconnectAttempt += 1;
-      setTimeout(connect, delay);
+      scheduleReconnect();
     }
   };
 
+  const reconnectNow = (): void => {
+    if (tornDown || port) return;
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    connect();
+  };
+
+  // The port lifecycle module closes live ports on pagehide and runs this on a persisted
+  // pageshow, so the liveness channel reopens before the page becomes interactive again.
+  const unregisterReconnect = registerContentPortReconnect(reconnectNow);
   connect();
+
+  return () => {
+    tornDown = true;
+    unregisterReconnect();
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    try {
+      port?.disconnect();
+    } catch {
+      readRuntimeLastError();
+    }
+    port = null;
+  };
 }
 
 /** @internal */

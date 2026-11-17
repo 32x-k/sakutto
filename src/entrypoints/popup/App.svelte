@@ -1,20 +1,32 @@
 <script lang="ts">
+  import { readRuntimeLastError } from '@/shared/runtime-last-error';
   import { onMount } from 'svelte';
   import { browser } from 'wxt/browser';
-  import { HIGH_QUALITY_MODEL_ID, getModel } from '@/engine/model/catalog';
+  import { DEFAULT_MODEL_ID, HIGH_QUALITY_MODEL_ID, getModel } from '@/engine/model/catalog';
+  import { sharedFolderSettingsHref } from '@/engine/model/folder-offer';
   import { shouldSuggestHighQuality } from '@/engine/model/suggestion';
   import {
+    modelNeedsDownload,
+    sharedFolderNeedsUserAction,
+    shouldShowModelDownloadGate,
     translationStartBlocked,
     type EngineStatus,
     type ModelStatus,
   } from '@/shared/engine-status';
+  import { sharedFolderNeedsPermission } from '@/engine/model/folder-status';
+  import {
+    queryStoredFolderPermission,
+    sharedFolderPickerAvailable,
+  } from '@/engine/model/shared-folder';
   import { hasLicenseConsent } from '@/shared/agreement';
+  import { openOrFocusExtensionTab } from '@/shared/extension-tabs';
   import { currentUiLanguage, t, tForBrowser, type MessageKey } from '@/shared/i18n';
   import {
     isModelProgressMessage,
     requestEngineStatus,
     requestEngineWarm,
     requestModelDownload,
+    requestResumeFolderGrantPending,
     requestPageCommand,
     requestPageState,
     requestQualitySample,
@@ -26,6 +38,7 @@
   import type { QualitySample } from '@/shared/quality';
   import type { Settings } from '@/shared/settings';
   import { loadSettings, saveSettings, subscribeSettings } from '@/shared/storage';
+  import { readFolderGrantPending } from '@/shared/folder-grant-pending';
   import {
     isPdfInspectResult,
     isPdfOpenResult,
@@ -74,6 +87,8 @@
     usesInPageFallback,
     type ShortcutCommand,
   } from '@/shared/shortcuts';
+  import { SHARED_FOLDER_CHANGED_EVENT } from '@/engine/model/folder-offer';
+  import { FOLDER_PERMISSION_ERROR } from '@/engine/model/folder-permission';
   import { readDeviceHeadroom, type DeviceHeadroom } from '@/ui/device-headroom';
   import LanguageField from '@/ui/LanguageField.svelte';
   import { runtimeLabel } from '@/ui/runtime-label';
@@ -110,6 +125,9 @@
   let pdfFailReason = $state<PdfOpenReason | null>(null);
   let engine = $state<EngineStatus | null>(null);
   let engineStatusError = $state(false);
+  /** True after an activation-driven grant attempt failed in the popup. */
+  let pendingFolderGrant = $state(false);
+  let folderEnableBusy = $state(false);
   let modelMark = $state<ModelStatus | null>(null);
   let quality = $state<QualitySample | null>(null);
   let headroom = $state<DeviceHeadroom | null>(null);
@@ -171,6 +189,8 @@
       mailAccessGranted === false,
   );
   let primaryLabel = $derived(translated ? t('restoreThisPage') : t('translateThisPage'));
+  let folderNeedsPermission = $derived(sharedFolderNeedsPermission(engine?.sharedFolder));
+  let showPendingFolderGrant = $derived(pendingFolderGrant && sharedFolderNeedsUserAction(engine));
   /**
    * The toolbar button starts a page translation, so it waits for the model the same way
    * the onboarding card does. Restoring an already translated page is always allowed, and
@@ -181,7 +201,20 @@
   let canStart = $derived(
     translated ||
       (hasBuiltInTranslatorUi() && isChromeOnlyLanguage(targetLanguage)) ||
+      // A folder-only install can show the permission error before the reader clicks.
+      // Keep the button usable so that click can renew the grant instead of requiring a
+      // second click on the separate restore card.
+      folderNeedsPermission ||
       !translationStartBlocked(engine ?? (modelMark ? { model: modelMark } : null)),
+  );
+  let modelNeedsInstall = $derived(
+    modelNeedsDownload(engine ?? (modelMark ? { model: modelMark } : null)),
+  );
+  let canChooseFolder = $derived(
+    sharedFolderPickerAvailable() || engine?.sharedFolder?.supported === true,
+  );
+  let showDownloadGate = $derived(
+    !canStart && shouldShowModelDownloadGate(engine ?? (modelMark ? { model: modelMark } : null)),
   );
   let engineText = $derived.by(() => {
     if (!engine && engineStatusError) return t('runtimeError');
@@ -314,11 +347,23 @@
     engineRetryCount = 0;
     engineStatusError = false;
     engine = { ...next, model: rememberModel(next.model) ?? next.model };
+    void refreshFolderGrantPending();
     if (next.model.state === 'loading') scheduleEngineRefresh(ENGINE_STATUS_POLL_MS);
     return true;
   }
 
   function applyProgress(status: ModelStatus) {
+    if (
+      status.error === FOLDER_PERMISSION_ERROR ||
+      status.state === 'ready' ||
+      status.state === 'loaded' ||
+      status.state === 'loading'
+    ) {
+      // Re-query the full engine snapshot. Patching only `model` leaves
+      // `plamoReady` / `sharedFolder` stale, so the popup stays on "waiting".
+      void refreshEngine();
+      return;
+    }
     const next = rememberModel(status);
     if (!next) return;
     if (engine && engine.model.id === next.id) {
@@ -343,6 +388,7 @@
   }
 
   async function changeTarget(language: TargetLanguage) {
+    void ensureFolderPermissionForAction();
     try {
       settings = await saveSettings({ targetLanguage: language });
       if (host && rule?.targetLanguage !== undefined) {
@@ -357,12 +403,42 @@
     }
   }
 
+  /**
+   * A popup click is a user gesture, so a dormant folder grant can be renewed here without
+   * sending the reader to Settings. A query that is already granted costs no prompt and no
+   * reload. This only runs for a page action that is about to read the folder.
+   */
+  interface FolderActionAccess {
+    allowed: boolean;
+    /** True when resuming a deferred command already performed the page action. */
+    resumed: boolean;
+  }
+
+  async function ensureFolderPermissionForAction(): Promise<FolderActionAccess> {
+    // The popup may only query. Persistent grant prompts run in the folder-enable tab.
+    const permission = await queryStoredFolderPermission().catch(() => null);
+    if (permission === 'granted') {
+      const resumed = await requestResumeFolderGrantPending();
+      return { allowed: true, resumed };
+    }
+    return { allowed: true, resumed: false };
+  }
+
   async function translatePage() {
     if (commandBusy || tabId === undefined || !host) return;
     commandBusy = true;
     try {
+      const access = await ensureFolderPermissionForAction();
+      if (!access.allowed) return;
+      // The resumed deferred command already toggled the page. Sending another command
+      // here would translate twice or restore immediately after the resume.
+      if (access.resumed) {
+        view = await requestPageState(tabId);
+        return;
+      }
       if (!(await ensureContentScript(tabId))) {
         pageReady = false;
+        pageMessage = 'unread';
         return;
       }
       view = await requestPageCommand(tabId, view?.active ? 'restore' : 'toggle');
@@ -475,17 +551,61 @@
 
   async function useHighQuality() {
     if (!hasLicenseConsent(settings)) {
-      await browser.tabs
-        .create({ url: browser.runtime.getURL('/onboarding.html') })
-        .catch(() => undefined);
+      void openOrFocusExtensionTab('/onboarding.html');
       return;
     }
     try {
+      await ensureFolderPermissionForAction();
       settings = await saveSettings({ highQualityDismissed: true });
       await requestModelDownload(HIGH_QUALITY_MODEL_ID);
     } catch {
       settingsError = 'save';
     }
+  }
+
+  async function refreshFolderGrantPending(): Promise<void> {
+    pendingFolderGrant = (await readFolderGrantPending()) !== null;
+  }
+
+  /** Re-grants must happen in a tab so Chrome can persist "Allow on every visit". */
+  async function enablePendingFolderGrant(): Promise<void> {
+    if (folderEnableBusy) return;
+    folderEnableBusy = true;
+    try {
+      await browser.runtime.sendMessage({ type: 'folder:open-enable' }).catch(() => {
+        readRuntimeLastError();
+      });
+      pendingFolderGrant = false;
+      window.close();
+    } finally {
+      folderEnableBusy = false;
+    }
+  }
+
+  /** Toolbar open is not a user gesture; refresh status only, never auto-show the restore card. */
+  async function refreshEngineOnOpen(): Promise<void> {
+    await refreshEngine();
+    await refreshFolderGrantPending();
+  }
+
+  /** Explicit recovery after the shared folder was stopped: no "waiting" without a download. */
+  async function downloadMissingModel() {
+    const stored = settings ?? (await loadSettings().catch(() => null));
+    if (!hasLicenseConsent(stored)) {
+      void openOrFocusExtensionTab('/onboarding.html');
+      return;
+    }
+    await ensureFolderPermissionForAction();
+    await requestModelDownload(DEFAULT_MODEL_ID);
+    await refreshEngine();
+  }
+
+  function openModelTools() {
+    void openOrFocusExtensionTab(sharedFolderSettingsHref((path) => browser.runtime.getURL(path)));
+  }
+
+  function openModelFolderSettings() {
+    void openOrFocusExtensionTab(sharedFolderSettingsHref((path) => browser.runtime.getURL(path)));
   }
 
   async function dismissHighQuality() {
@@ -497,7 +617,9 @@
   }
 
   function openOptions() {
-    void browser.runtime.openOptionsPage().catch(() => undefined);
+    void browser.runtime.openOptionsPage().catch(() => {
+      readRuntimeLastError();
+    });
   }
 
   async function changeShortcuts() {
@@ -505,13 +627,13 @@
   }
 
   function openOnboarding() {
-    void browser.tabs
-      .create({ url: browser.runtime.getURL('/onboarding.html') })
-      .catch(() => undefined);
+    void openOrFocusExtensionTab('/onboarding.html');
   }
 
   function openTyped() {
-    void browser.tabs.create({ url: browser.runtime.getURL('/typed.html') }).catch(() => undefined);
+    void browser.tabs.create({ url: browser.runtime.getURL('/typed.html') }).catch(() => {
+      readRuntimeLastError();
+    });
   }
 
   onMount(() => {
@@ -531,7 +653,11 @@
       if (!isModelProgressMessage(message)) return;
       applyProgress(message.status);
     };
+    const onFolderChanged = () => {
+      void refreshEngine();
+    };
     browser.runtime.onMessage.addListener(onMessage);
+    window.addEventListener(SHARED_FOLDER_CHANGED_EVENT, onFolderChanged);
 
     void settleCaptionEnableIntent().then((settled) => {
       if (settled.applied) void refreshSettings();
@@ -541,9 +667,10 @@
       void refreshSettings();
       void refreshPage();
     });
+    void refreshEngineOnOpen();
+    void refreshFolderGrantPending();
     void refreshSettings();
     void refreshPage();
-    void refreshEngine();
     void requestEngineWarm();
     void requestQualitySample().then((sample) => {
       quality = sample;
@@ -575,6 +702,7 @@
       window.clearTimeout(shortcutRefreshTimer);
       window.removeEventListener('focus', scheduleShortcutRefresh);
       document.removeEventListener('visibilitychange', scheduleShortcutRefresh);
+      window.removeEventListener(SHARED_FOLDER_CHANGED_EVENT, onFolderChanged);
     };
   });
 </script>
@@ -587,6 +715,18 @@
       <p class="muted">{t('tagline')}</p>
     </div>
   </header>
+
+  {#if showPendingFolderGrant}
+    <button
+      class="button block"
+      type="button"
+      data-sakutto="popup-folder-enable"
+      disabled={folderEnableBusy}
+      onclick={() => void enablePendingFolderGrant()}
+    >
+      {t('modelFolderEnableOneClick')}
+    </button>
+  {/if}
 
   {#if pdfUrl.length > 0}
     <button
@@ -617,19 +757,54 @@
     </button>
   {/if}
 
-  {#if !canStart && pdfUrl.length === 0}
+  {#if showDownloadGate && pdfUrl.length === 0}
     <div class="panel gate" role="status">
-      <p class="muted">{t('pageStartBlocked')}</p>
-      <button class="link-button" type="button" onclick={openOnboarding}>
-        {t('openOnboarding')}
-      </button>
+      {#if modelNeedsInstall}
+        <p class="muted">{t('modelSelectionMissing')}</p>
+        <div class="gate-actions">
+          <button
+            class="button"
+            type="button"
+            data-sakutto="popup-model-download"
+            onclick={() => void downloadMissingModel()}
+          >
+            {t('modelDownload')}
+          </button>
+          <button
+            class="button secondary"
+            type="button"
+            data-sakutto="popup-model-import"
+            onclick={openModelTools}
+          >
+            {t('modelImportChoose')}
+          </button>
+          {#if canChooseFolder}
+            <button
+              class="button secondary"
+              type="button"
+              data-sakutto="popup-model-folder"
+              onclick={openModelFolderSettings}
+            >
+              {t('modelFolderChoose')}
+            </button>
+          {/if}
+        </div>
+      {:else}
+        <p class="muted">{t('pageStartBlocked')}</p>
+        <button class="link-button" type="button" onclick={openOnboarding}>
+          {t('openOnboarding')}
+        </button>
+      {/if}
     </div>
   {/if}
 
-  <p class="engine" aria-live="polite">{engineText}</p>
+  {#if !folderNeedsPermission && !modelNeedsInstall}
+    <p class="engine" aria-live="polite">{engineText}</p>
+  {/if}
   {#if engine?.modelFallback}
     <p class="muted" role="status">{t('modelSelectionFallback')}</p>
   {/if}
+
   {#if engine?.engineSource === 'local-server'}
     <p class="muted">{t('localServerExperimental')}</p>
     {#if engine.parallel !== null}
@@ -892,6 +1067,12 @@
 
   .gate .link-button {
     font-size: 12px;
+  }
+
+  .gate-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
   }
 
   .offer-actions {

@@ -14,6 +14,7 @@ import {
 import {
   PAGE_SHORTCUT_DEDUP_MS,
   PageSession,
+  capturePageSelection,
   type PageEngine,
   type SessionPreferences,
 } from '@/dom/session';
@@ -39,6 +40,7 @@ const labels = {
   barRate: (tokens: string, segments: string) => `${tokens} tok/s · ${segments} seg/s`,
   barDone: '翻訳しました。',
   barPartial: (blocks: number) => `翻訳できない箇所が ${String(blocks)} 件残っています。`,
+  modelMissing: '翻訳モデルがありません。ダウンロードしてください。',
   barOriginal: '原文に戻す',
   barAlways: 'このサイトを常に翻訳します',
   barAlwaysOn: 'このサイトは常に翻訳します。',
@@ -84,6 +86,23 @@ function immediate(
     for (const segment of segments) {
       yield { id: segment.id, textDelta: '…', engine };
       yield { id: segment.id, final: render(segment.text), engine };
+    }
+  });
+}
+
+function stalled(): PageEngine {
+  return engineOf(async function* (segments, options) {
+    await new Promise<void>((resolve) => {
+      const done = (): void => resolve();
+      if (options.signal.aborted) {
+        done();
+        return;
+      }
+      options.signal.addEventListener('abort', done, { once: true });
+    });
+    if (options.signal.aborted) return;
+    for (const segment of segments) {
+      yield { id: segment.id, final: `訳:${segment.text}`, engine: 'plamo' as const };
     }
   });
 }
@@ -242,6 +261,44 @@ describe('page session', () => {
     expect(document.querySelector('sakutto-note')).toBeNull();
   });
 
+  it('clears the navigation stop after a persisted BFCache restore', async () => {
+    document.documentElement.lang = 'en';
+    document.body.innerHTML = '<p>Hello world</p>';
+    const session = start(
+      document,
+      immediate((text) => `訳:${text}`),
+    );
+
+    window.dispatchEvent(new Event('pagehide'));
+    const restored = new Event('pageshow');
+    Object.defineProperty(restored, 'persisted', { value: true });
+    window.dispatchEvent(restored);
+
+    await session.handle('toggle');
+    await session.whenIdle();
+
+    expect(document.body.textContent).toContain('訳:Hello world');
+  });
+
+  it('captures the document selection before later awaits can clear it', () => {
+    document.documentElement.lang = 'en';
+    document.body.innerHTML = '<p id="lead">Hello world</p>';
+    const lead = document.querySelector('#lead');
+    if (!lead) throw new Error('missing lead');
+    const range = document.createRange();
+    range.selectNodeContents(lead);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    const snapshot = capturePageSelection(document);
+    expect(snapshot?.text).toBe('Hello world');
+    expect(snapshot?.rect).toBeInstanceOf(DOMRect);
+
+    selection?.removeAllRanges();
+    expect(capturePageSelection(document)).toBeNull();
+  });
+
   it('streams plain text and keeps placeholder segments intact until the final text', async () => {
     document.documentElement.lang = 'en';
     document.body.innerHTML = '<p>Hello</p><p>See <a href="/docs">docs</a></p>';
@@ -309,6 +366,99 @@ describe('page session', () => {
     release();
     await session.whenIdle();
     expect(document.body.textContent).toContain('こんにちは');
+  });
+
+  it('does not arm the selection folder timeout when the grant gate is off', async () => {
+    vi.useFakeTimers();
+    try {
+      document.documentElement.lang = 'en';
+      document.body.innerHTML = '<p>Hello world</p>';
+      const session = new PageSession(document, {
+        engine: stalled(),
+        labels,
+        preferences: preferences(),
+        scheduleFrame: (callback) => callback(),
+        debounceMs: 20,
+        folderGrantUiActive: false,
+      });
+      sessions.push(session);
+      const begin = vi.spyOn(session, 'beginFolderGrantWait');
+
+      session.translateSelection('Hello world', new DOMRect(12, 12, 80, 18));
+      await vi.advanceTimersByTimeAsync(12_500);
+
+      expect(begin).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('arms the selection folder timeout when the grant needs action', async () => {
+    vi.useFakeTimers();
+    try {
+      document.documentElement.lang = 'en';
+      document.body.innerHTML = '<p>Hello world</p>';
+      const session = new PageSession(document, {
+        engine: stalled(),
+        labels,
+        preferences: preferences(),
+        scheduleFrame: (callback) => callback(),
+        debounceMs: 20,
+        folderGrantUiActive: true,
+      });
+      sessions.push(session);
+      const begin = vi.spyOn(session, 'beginFolderGrantWait').mockImplementation(() => undefined);
+
+      session.translateSelection('Hello world', new DOMRect(12, 12, 80, 18));
+      await vi.advanceTimersByTimeAsync(12_500);
+
+      expect(begin).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops an active page and shows no-model text when the model is removed', async () => {
+    document.documentElement.lang = 'en';
+    document.body.innerHTML = Array.from(
+      { length: 12 },
+      (_, index) => `<p>Hello world ${String(index)}</p>`,
+    ).join('');
+    let signal: AbortSignal | undefined;
+    const session = start(
+      document,
+      engineOf(async function* (segments, options) {
+        signal = options.signal;
+        await new Promise<void>((resolve) => {
+          const done = (): void => resolve();
+          if (options.signal.aborted) {
+            done();
+            return;
+          }
+          options.signal.addEventListener('abort', done, { once: true });
+        });
+        if (options.signal.aborted) return;
+        for (const segment of segments) {
+          yield { id: segment.id, final: `訳:${segment.text}`, engine: 'plamo' as const };
+        }
+      }),
+    );
+
+    await session.translate();
+    await vi.waitFor(() => {
+      expect(signal).toBeDefined();
+    });
+    expect(session.state().pending).toBeGreaterThan(0);
+
+    session.noteModelMissing();
+    await session.whenIdle();
+
+    expect(signal?.aborted).toBe(true);
+    expect(session.state().pending).toBe(0);
+    const bar = document.querySelector<HTMLElement>('sakutto-bar');
+    expect(bar?.hidden).toBe(false);
+    expect(uiShadow(bar)?.textContent).toContain(labels.modelMissing);
+    expect(document.documentElement.dataset.sakuttoState).not.toBe('translating');
   });
 
   it('shows a bilingual line without rewriting the original nodes', async () => {

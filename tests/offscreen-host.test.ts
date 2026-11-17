@@ -14,10 +14,13 @@ import {
   RETRY_RUNTIME_IDLE_MS,
   canReuseLoadedRuntimeForRetry,
   loadWithFallback,
+  modelStatusForSharedFolder,
+  sharedFolderAllowsModelLoad,
   warmup,
   type EngineServices,
 } from '@/engine/offscreen/host';
 import type { LoadedModel } from '@/engine/model/manager';
+import type { SharedFolderStatus } from '@/engine/model/folder-status';
 import type { ModelStatus } from '@/shared/engine-status';
 import { normalizeSettings } from '@/shared/settings';
 import * as storage from '@/shared/storage';
@@ -63,6 +66,7 @@ function createServices() {
   const unload = vi.fn(async () => undefined);
   const reset = vi.fn();
   const dispose = vi.fn(async () => undefined);
+  const disposeRetry = vi.fn(async () => undefined);
   const download = vi.fn<DownloadFn>(async () => undefined);
 
   const services = {
@@ -79,9 +83,10 @@ function createServices() {
     lazy: { kind: 'plamo', reset, translate: vi.fn() },
     load: vi.fn(async () => ({})),
     selection: SELECTION,
+    disposeRetryRuntime: disposeRetry,
   } as unknown as EngineServices;
 
-  return { services, unload, reset, dispose, download };
+  return { services, unload, reset, dispose, disposeRetry, download };
 }
 
 function installed(
@@ -157,7 +162,107 @@ function cacheRouter(
   } as unknown as EngineServices['router'];
 }
 
+describe('shared folder load fallback', () => {
+  const needsPermission = {
+    supported: true,
+    configured: true,
+    permission: 'prompt' as const,
+    opfsCopies: [],
+    integrityIssues: [],
+  };
+
+  it('allows a load when a verified OPFS copy can answer despite the missing folder grant', async () => {
+    const hasReadableCopy = vi.fn(async () => true);
+    await expect(
+      sharedFolderAllowsModelLoad(needsPermission, { hasReadableCopy }, DEFAULT_MODEL_ID),
+    ).resolves.toBe(true);
+    expect(hasReadableCopy).toHaveBeenCalledWith(DEFAULT_MODEL_ID);
+  });
+
+  it('blocks a load when the folder needs permission and no verified copy exists', async () => {
+    const hasReadableCopy = vi.fn(async () => false);
+    await expect(
+      sharedFolderAllowsModelLoad(needsPermission, { hasReadableCopy }, DEFAULT_MODEL_ID),
+    ).resolves.toBe(false);
+  });
+
+  it('does not consult the copy when the folder grant is active', async () => {
+    const hasReadableCopy = vi.fn(async () => false);
+    await expect(
+      sharedFolderAllowsModelLoad(
+        { ...needsPermission, permission: 'granted' },
+        { hasReadableCopy },
+        DEFAULT_MODEL_ID,
+      ),
+    ).resolves.toBe(true);
+    expect(hasReadableCopy).not.toHaveBeenCalled();
+  });
+
+  it('keeps downloading, verifying, and loading states instead of a folder error', () => {
+    for (const state of ['downloading', 'verifying', 'loading'] as const) {
+      expect(
+        modelStatusForSharedFolder(
+          modelStatus({ state, received: 5, total: 10, progress: 0.5 }),
+          needsPermission,
+        ),
+      ).toMatchObject({ state });
+    }
+    expect(
+      modelStatusForSharedFolder(modelStatus({ state: 'absent' }), needsPermission),
+    ).toMatchObject({ state: 'error', error: 'model-folder-permission' });
+  });
+});
+
 describe('EngineHost', () => {
+  it('detects a revoked folder grant during status polling before replying', async () => {
+    const { services } = createServices();
+    services.manager.status = vi.fn(async () => modelStatus({ state: 'absent' }));
+    let folder: SharedFolderStatus = {
+      supported: true,
+      configured: true,
+      permission: 'granted',
+      name: 'Sakutto',
+      opfsCopies: [],
+      integrityIssues: [],
+      recordedModels: [DEFAULT_MODEL_ID],
+    };
+    const refreshPermissionSnapshot = vi.fn(async () => {
+      folder = { ...folder, permission: 'prompt' };
+      return folder;
+    });
+
+    const host = createHost(services);
+    (
+      host as unknown as {
+        folderSession: {
+          status: () => SharedFolderStatus;
+          refreshPermissionSnapshot: () => Promise<SharedFolderStatus>;
+        };
+      }
+    ).folderSession = {
+      status: () => folder,
+      refreshPermissionSnapshot,
+    };
+    const port = new FakePort();
+    host.handlePort(port.port);
+
+    port.emit({ type: 'status', requestId: 's1' });
+    await flushTasks();
+
+    expect(refreshPermissionSnapshot).toHaveBeenCalledOnce();
+    const response = port.messagesOfType('response').at(-1) as {
+      value?: {
+        model?: { state?: string; error?: string };
+        sharedFolder?: { permission?: string };
+      };
+    };
+    expect(response.value?.sharedFolder?.permission).toBe('prompt');
+    expect(response.value?.model).toMatchObject({
+      state: 'error',
+      error: 'model-folder-permission',
+    });
+  });
+
   it('stops a cancelled translation without sending done', async () => {
     const { services } = createServices();
     const release = deferred<void>();
@@ -270,6 +375,8 @@ describe('EngineHost', () => {
     const port = new FakePort();
     host.handlePort(port.port);
 
+    port.emit(runtimeSet({ consented: true, requestId: 'runtime-on' }));
+    await flushTasks();
     port.emit({ type: 'model-download', requestId: 'd1', modelId: DEFAULT_MODEL_ID });
     await flushTasks();
     expect(port.messagesOfType('model-progress')).toHaveLength(1);
@@ -419,6 +526,26 @@ describe('EngineHost', () => {
     expect(unload).toHaveBeenCalled();
     expect(port.messagesOfType('model-persist')).toHaveLength(0);
     expect(cacheModelIdOf(host)).toBe(HIGH_QUALITY_MODEL_ID);
+  });
+
+  it('drops a loaded runtime when the shared folder is reloaded after a move', async () => {
+    const { services, unload, reset, disposeRetry } = createServices();
+    const { port } = await openRunningHost(services);
+    reset.mockClear();
+    unload.mockClear();
+    disposeRetry.mockClear();
+
+    port.emit({ type: 'folder-reload', requestId: 'f1' });
+    await flushTasks();
+
+    expect(reset).toHaveBeenCalled();
+    expect(disposeRetry).toHaveBeenCalled();
+    expect(unload).toHaveBeenCalled();
+    const response = port.messagesOfType('response').at(-1) as {
+      requestId?: string;
+      ok?: boolean;
+    };
+    expect(response).toMatchObject({ requestId: 'f1', ok: true });
   });
 
   it('resets a loaded runtime when model-set changes the id, and caches the next translation under the new model', async () => {
@@ -651,6 +778,8 @@ describe('EngineHost', () => {
       });
     }) as never;
 
+    port.emit(runtimeSet({ consented: true, requestId: 'runtime-on' }));
+    await flushTasks();
     port.emit({ type: 'model-warm', requestId: 'w1' });
     await flushTasks();
     port.emit({ type: 'model-set', requestId: 'm1', modelId: HIGH_QUALITY_MODEL_ID });
@@ -870,6 +999,7 @@ describe('EngineHost', () => {
     });
     await flushTasks();
     expect(translate).not.toHaveBeenCalled();
+    expect(services.load).not.toHaveBeenCalled();
 
     port.emit(
       runtimeSet({
@@ -1127,6 +1257,8 @@ describe('warm-up session fallback', () => {
     services.load = vi.fn(async () => services.manager.loadedModel) as never;
 
     const { port } = await openRunningHost(services);
+    port.emit(runtimeSet({ consented: true, requestId: 'runtime-on' }));
+    await flushTasks();
     port.emit({ type: 'model-warm', requestId: 'w1' });
     await vi.waitFor(() => {
       expect(leaveWebGpu).toHaveBeenCalledWith('degenerate');

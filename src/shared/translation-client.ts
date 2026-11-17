@@ -8,6 +8,8 @@ import {
   type TranslationClientMessage,
 } from '@/engine/offscreen/protocol';
 import { ChunkStream } from '@/engine/queue/chunk-stream';
+import { trackContentPort } from './content-port-lifecycle';
+import { bindPortDisconnectCleanup, readRuntimeLastError } from './runtime-last-error';
 import type { TranslateOptions, TranslateSegment, TranslationChunk } from '@/engine/types';
 
 /**
@@ -22,6 +24,7 @@ export async function* translateViaBackground(
 
   const requestId = crypto.randomUUID();
   const port = browser.runtime.connect({ name: TRANSLATION_PORT });
+  const untrack = trackContentPort(port);
   const stream = new ChunkStream<TranslationChunk>();
 
   const onMessage = (message: unknown): void => {
@@ -36,17 +39,16 @@ export async function* translateViaBackground(
     }
   };
 
-  const onDisconnect = (): void => {
-    stream.fail(new EngineError('offscreen-unavailable', 'The translation connection closed.'));
-  };
-
   port.onMessage.addListener(onMessage);
-  port.onDisconnect.addListener(onDisconnect);
+  bindPortDisconnectCleanup(port, () => {
+    stream.fail(new EngineError('offscreen-unavailable', 'The translation connection closed.'));
+  });
 
   const cancel = (): void => {
     try {
       port.postMessage({ type: 'cancel', requestId } satisfies TranslationClientMessage);
     } catch {
+      readRuntimeLastError();
       // The port is already gone.
     }
     stream.end();
@@ -72,9 +74,11 @@ export async function* translateViaBackground(
         });
   } finally {
     options.signal.removeEventListener('abort', cancel);
+    untrack();
     try {
       port.disconnect();
     } catch {
+      readRuntimeLastError();
       // Already disconnected.
     }
   }

@@ -4,6 +4,8 @@ import type { OverlayLabels } from '@/dom/overlay';
 import { PageSession, preferencesFor } from '@/dom/session';
 import { t } from '@/shared/i18n';
 import { isTargetLanguage } from '@/shared/languages';
+import { FOLDER_PERMISSION_ERROR } from '@/engine/model/folder-permission';
+import { sharedFolderNeedsUserAction } from '@/shared/engine-status';
 import { isModelProgressMessage, requestEngineStatus } from '@/shared/messages';
 import { loadSettings } from '@/shared/storage';
 import { translateViaBackground } from '@/shared/translation-client';
@@ -29,6 +31,7 @@ function overlayLabels(): OverlayLabels {
     barOriginal: t('restoreThisPage'),
     barAlways: t('alwaysTranslateSite'),
     engineFailed: t('localServerFailed'),
+    folderPermission: t('modelFolderPermissionPage'),
     barAlwaysOn: t('pageAlwaysOn'),
   };
 }
@@ -69,12 +72,18 @@ const session = new PageSession(document, {
 
 browser.runtime.onMessage.addListener((message) => {
   if (!isModelProgressMessage(message)) return;
-  if (message.status.state === 'loaded') session.retryUntranslated();
+  if (message.status.error === FOLDER_PERMISSION_ERROR) session.noteFolderPermission();
+  if (message.status.state === 'loaded' || message.status.state === 'ready') {
+    session.retryUntranslated();
+  }
 });
 
 void requestEngineStatus()
   .then((status) => {
-    if (status?.model.state === 'loaded') session.retryUntranslated();
+    if (sharedFolderNeedsUserAction(status)) session.noteFolderPermission();
+    if (status?.model.state === 'loaded' || status?.model.state === 'ready') {
+      session.retryUntranslated();
+    }
   })
   .catch(() => undefined);
 

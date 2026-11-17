@@ -246,6 +246,18 @@
   "onboardingStart": {
     "message": "Đồng ý với giấy phép và bắt đầu"
   },
+  "onboardingStoreLegend": {
+    "message": "Nơi lưu mô hình"
+  },
+  "onboardingStoreBrowser": {
+    "message": "Lưu trong trình duyệt này (khuyến nghị)"
+  },
+  "onboardingStoreFolder": {
+    "message": "Use a shared model folder (Chromium browsers)"
+  },
+  "onboardingStoreFolderHelp": {
+    "message": "For people who use Chrome, Edge, or another Chromium browser: one model copy is shared between them."
+  },
   "onboardingStartFailed": {
     "message": "Không thể khởi động thiết lập. Vui lòng thử lại."
   },
@@ -677,6 +689,150 @@
   },
   "modelSelectionMissing": {
     "message": "Chưa có mô hình dịch. Tải một mô hình để dịch."
+  },
+  "modelFolderHeading": {
+    "message": "Share the model folder across Chromium browsers"
+  },
+  "modelFolderHelp": {
+    "message": "The default is still storage inside this browser."
+  },
+  "modelFolderPickerHint": {
+    "message": "The folder picker starts in Documents. Create or choose a folder named “Sakutto” there (for example Documents/Sakutto), or choose any folder you can write to."
+  },
+  "modelFolderChoose": {
+    "message": "Choose model folder"
+  },
+  "modelFolderStop": {
+    "message": "Stop using shared folder"
+  },
+  "modelFolderUsing": {
+    "message": "Using the folder $NAME$.",
+    "placeholders": {
+      "name": {
+        "content": "$1"
+      }
+    }
+  },
+  "modelFolderNotUsing": {
+    "message": "Models are stored inside this browser."
+  },
+  "modelFolderPermissionNeeded": {
+    "message": "Sakutto needs permission to read the shared model folder."
+  },
+  "modelFolderPermissionPresent": {
+    "message": "The model is already in the folder. Allow access to use it."
+  },
+  "modelFolderPermissionGrant": {
+    "message": "Allow folder access"
+  },
+  "modelFolderPermissionPage": {
+    "message": "Sakutto opens a grant tab. Choose Allow on every visit there when the browser asks."
+  },
+  "modelFolderPersistentHint": {
+    "message": "After you choose a shared folder in Settings, pick Allow on every visit when asked (Japanese Chrome: 「サイトアクセス時は常に許可」, Japanese Edge: 「常に許可」). Restarts then need no extra clicks."
+  },
+  "modelFolderPickFailed": {
+    "message": "The folder could not be selected."
+  },
+  "modelFolderIntegrityFailed": {
+    "message": "The file $FILE$ is not the official PLaMo model, so Sakutto will not use it.",
+    "placeholders": {
+      "file": {
+        "content": "$1"
+      }
+    }
+  },
+  "modelFolderOpfsCopy": {
+    "message": "A leftover copy of $MODEL$ is still in this browser's storage. You can delete it to free space.",
+    "placeholders": {
+      "model": {
+        "content": "$1"
+      }
+    }
+  },
+  "modelFolderDeleteOpfs": {
+    "message": "Delete browser copy"
+  },
+  "modelFolderEnableTabTitle": {
+    "message": "Keep folder access after restart"
+  },
+  "modelFolderEnableTabBody": {
+    "message": "Choose Allow on every visit (Japanese Chrome: 「サイトアクセス時は常に許可」, Japanese Edge: 「常に許可」) so this folder stays allowed after every restart with no clicks."
+  },
+  "modelFolderEnableTabHint": {
+    "message": "If you choose Allow this time only, return here after a restart. Translation still works from the browser copy."
+  },
+  "modelFolderEnableTabDone": {
+    "message": "Folder access is ready. This tab closes automatically."
+  },
+  "modelFolderEnableOneClick": {
+    "message": "Enable Sakutto"
+  },
+  "modelFolderBenefitsLead": {
+    "message": "A shared folder means:"
+  },
+  "modelFolderBenefitShare": {
+    "message": "Other profiles and other Chromium browsers can use it right away, with no extra download."
+  },
+  "modelFolderBenefitSpace": {
+    "message": "One copy on disk, so you save space ($SIZE$).",
+    "placeholders": {
+      "size": {
+        "content": "$1"
+      }
+    }
+  },
+  "modelFolderBenefitKeep": {
+    "message": "The file stays if you clear this browser's data. Pick the same folder again and you skip the download."
+  },
+  "modelImportHeading": {
+    "message": "Nhập tệp mô hình"
+  },
+  "modelImportHelp": {
+    "message": "Chọn tệp .gguf chính thức của PLaMo. Tệp được truyền vào bộ nhớ trình duyệt và kiểm tra trước khi dùng; sau đó Sakutto sẽ không yêu cầu tệp lại nữa."
+  },
+  "modelImportModelLabel": {
+    "message": "Mô hình"
+  },
+  "modelImportChoose": {
+    "message": "Nhập tệp .gguf"
+  },
+  "modelImportExport": {
+    "message": "Xuất tệp mô hình"
+  },
+  "modelImportExportDone": {
+    "message": "Tệp mô hình đã được lưu vào thư mục tải xuống của trình duyệt."
+  },
+  "modelImportExporting": {
+    "message": "Tệp mô hình đang được xuất."
+  },
+  "modelImportDone": {
+    "message": "Tệp mô hình đã được nhập và xác minh."
+  },
+  "modelImportWrongFile": {
+    "message": "Tệp này không phải mô hình PLaMo chính thức ($FILE$). Hãy chọn tệp .gguf chính thức tương ứng.",
+    "placeholders": {
+      "file": {
+        "content": "$1"
+      }
+    }
+  },
+  "modelImportFailed": {
+    "message": "Không thể nhập tệp mô hình."
+  },
+  "modelExportMissing": {
+    "message": "Chưa có tệp mô hình để xuất."
+  },
+  "modelExportFailed": {
+    "message": "Không thể xuất tệp mô hình."
+  },
+  "modelFolderLocationHint": {
+    "message": "Tệp trong thư mục chia sẻ nằm tại <chosen>/$PATH$.",
+    "placeholders": {
+      "path": {
+        "content": "$1"
+      }
+    }
   },
   "highQualityOffer": {
     "message": "Bạn có thể dùng thử mô hình có độ chính xác cao hơn (2B, khoảng 1,81 GB). Tốc độ tùy thuộc vào thiết bị này."

@@ -24,6 +24,50 @@ test.describe('built extension', () => {
         await expect(page.locator('h1')).toHaveText('Sakutto - Local AI translation');
         if (path === 'onboarding.html') {
           await expect(page.getByRole('checkbox')).toHaveCount(0);
+          const radios = page.getByRole('radio');
+          await expect(radios).toHaveCount(2);
+          await expect(radios.nth(0)).toHaveAccessibleName('Save in this browser (recommended)');
+          await expect(radios.nth(0)).toBeChecked();
+          await expect(radios.nth(1)).toHaveAccessibleName(
+            'Use a shared model folder (Chromium browsers)',
+          );
+          await expect(radios.nth(1)).not.toBeChecked();
+          await expect(page.locator('[data-store-recommended]')).toContainText(
+            'Save in this browser (recommended)',
+          );
+          await expect(
+            page.getByText(
+              'For people who use Chrome, Edge, or another Chromium browser: one model copy is shared between them.',
+            ),
+          ).toBeVisible();
+          await expect(
+            page.getByText(
+              'The folder picker starts in Documents. Create or choose a folder named “Sakutto” there (for example Documents/Sakutto), or choose any folder you can write to.',
+            ),
+          ).toBeVisible();
+          await expect(
+            page.getByText(
+              'After you choose a shared folder in Settings, pick Allow on every visit when asked',
+            ),
+          ).toBeVisible();
+          await expect(page.getByText('Restarts then need no extra clicks')).toBeVisible();
+          await expect(page.getByText('サイトアクセス時は常に許可')).toBeVisible();
+          await expect(page.getByText('Japanese Edge: 「常に許可」')).toBeVisible();
+          await expect(page.getByText('A shared folder means:')).toBeVisible();
+          await expect(
+            page.getByText(
+              'Other profiles and other Chromium browsers can use it right away, with no extra download.',
+            ),
+          ).toBeVisible();
+          await expect(
+            page.getByText('One copy on disk, so you save space (573 MB / 1.81 GB).'),
+          ).toBeVisible();
+          await expect(
+            page.getByText(
+              "The file stays if you clear this browser's data. Pick the same folder again and you skip the download.",
+            ),
+          ).toBeVisible();
+          await expect(page.getByRole('heading', { name: 'Import a model file' })).toHaveCount(0);
           await expect(
             page.getByRole('button', { name: 'Agree to the license and start' }),
           ).toBeEnabled();
@@ -106,6 +150,47 @@ test.describe('built extension', () => {
         await expect(page.locator('h1')).toHaveText('Sakutto - ローカルAI翻訳');
         if (path === 'onboarding.html') {
           await expect(page.getByRole('checkbox')).toHaveCount(0);
+          const radios = page.getByRole('radio');
+          await expect(radios).toHaveCount(2);
+          await expect(radios.nth(0)).toHaveAccessibleName('このブラウザ内に保存する（おすすめ）');
+          await expect(radios.nth(0)).toBeChecked();
+          await expect(radios.nth(1)).toHaveAccessibleName(
+            '共有モデルフォルダを使う（Chromiumブラウザ）',
+          );
+          await expect(radios.nth(1)).not.toBeChecked();
+          await expect(page.locator('[data-store-recommended]')).toContainText(
+            'このブラウザ内に保存する（おすすめ）',
+          );
+          await expect(
+            page.getByText(
+              'Chrome や Edge など複数の Chromium ブラウザで使う人向けです。モデルは1つで済みます。',
+            ),
+          ).toBeVisible();
+          await expect(
+            page.getByText(
+              'フォルダ選択はドキュメントで開きます。「Sakutto」というフォルダを作成するか選んでください（例：ドキュメント/Sakutto）。書き込みできる別のフォルダでもかまいません。',
+            ),
+          ).toBeVisible();
+          await expect(
+            page.getByText('設定で共有フォルダを選んだあと、ブラウザが求めたら'),
+          ).toBeVisible();
+          await expect(page.getByText('再起動後も追加のクリックは不要になります')).toBeVisible();
+          await expect(page.getByText('サイトアクセス時は常に許可')).toBeVisible();
+          await expect(page.getByText('「常に許可」（Edge）')).toBeVisible();
+          await expect(page.getByText('共有フォルダを使うと：')).toBeVisible();
+          await expect(
+            page.getByText(
+              '他のプロフィールや別の Chromium ブラウザでもダウンロードなしですぐ使える',
+            ),
+          ).toBeVisible();
+          await expect(
+            page.getByText('モデルは1つだけなので容量を節約（573 MB / 1.81 GB）'),
+          ).toBeVisible();
+          await expect(
+            page.getByText(
+              'ブラウザのデータを消してもファイルは残る。同じフォルダを選べば再ダウンロード不要',
+            ),
+          ).toBeVisible();
           await expect(
             page.getByRole('button', { name: 'ライセンスに同意して開始' }),
           ).toBeEnabled();

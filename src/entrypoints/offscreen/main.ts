@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import { readRuntimeLastError, safeSendResponse } from '@/shared/runtime-last-error';
 import { EngineHost } from '@/engine/offscreen/host';
 import {
   applyFirefoxWebGpuKickFlag,
@@ -24,7 +25,12 @@ browser.runtime.onConnect.addListener((port) => {
 });
 
 if (typeof window !== 'undefined' && window.parent !== window) {
-  window.parent.postMessage({ source: FRAME_READY, type: 'ready' }, window.location.origin);
+  try {
+    window.parent.postMessage({ source: FRAME_READY, type: 'ready' }, window.location.origin);
+  } catch {
+    // The embedding frame went away while the offscreen document was opening.
+  }
+  readRuntimeLastError();
 }
 
 browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -33,9 +39,15 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isEngineProbeRequest(message)) return false;
 
   void probeCapabilities().then(
-    (capabilities) =>
-      sendResponse({ source: 'offscreen', capabilities } satisfies EngineProbeResponse),
-    () => sendResponse(null),
+    (capabilities) => {
+      safeSendResponse(sendResponse, {
+        source: 'offscreen',
+        capabilities,
+      } satisfies EngineProbeResponse);
+    },
+    () => {
+      safeSendResponse(sendResponse, null);
+    },
   );
   return true;
 });

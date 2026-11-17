@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import { armFolderCommand } from '@/content/folder-arm-gate';
 import { listPageBlocks } from '@/dom/blocks';
 import { ComposeController, type ComposeLabels, type ComposePreferences } from '@/dom/compose';
 import { shouldHandleComposeCommand } from '@/dom/compose-field';
@@ -11,7 +12,12 @@ import {
   type OutlookBannerLabels,
 } from '@/dom/outlook-banner';
 import type { OverlayLabels } from '@/dom/overlay';
-import { PageSession, preferencesFor } from '@/dom/session';
+import {
+  PageSession,
+  capturePageSelection,
+  preferencesFor,
+  type PageSelectionSnapshot,
+} from '@/dom/session';
 import { VideoCaptionSession, type CaptionSessionPreferences } from '@/captions/session';
 import type { CaptionOverlayLabels } from '@/captions/overlay';
 import { captionsAllowedOnPage, videoCaptionPositionSite } from '@/captions/sites';
@@ -23,9 +29,15 @@ import {
   subscribeSiteRules,
   type SiteRule,
 } from '@/dom/sites';
+import {
+  isFolderGrantCompleteMessage,
+  isFolderGrantNeededMessage,
+} from '@/shared/folder-grant-messages';
+import { FOLDER_PERMISSION_ERROR } from '@/engine/model/folder-permission';
 import { hasLicenseConsent } from '@/shared/agreement';
-import type { ModelStatus } from '@/shared/engine-status';
+import { sharedFolderNeedsUserAction, type ModelStatus } from '@/shared/engine-status';
 import { mergeGlossary } from '@/shared/glossary';
+import { readRuntimeLastError } from '@/shared/runtime-last-error';
 import { currentUiLanguage, t } from '@/shared/i18n';
 import {
   displayLanguage,
@@ -58,10 +70,12 @@ import {
   type ShortcutQueryResult,
   type ShortcutSnapshot,
 } from '@/shared/messages';
+import { modelRemovalOutcome } from '@/shared/model-progress';
 import { loadSettings, saveSettings, subscribeSettings } from '@/shared/storage';
 import type { Settings, VideoCaptionPosition } from '@/shared/settings';
 import { typedReadiness, type TypedReadiness } from '@/shared/typed-translation';
 import { translateViaBackground } from '@/shared/translation-client';
+import { installContentPortLifecycle } from '@/shared/content-port-lifecycle';
 import {
   CONTENT_INSTANCE_DOC_ATTR,
   claimContentExtensionInstance,
@@ -90,7 +104,10 @@ const bridge = globalThis as typeof globalThis & ContentBridgeGlobal;
 async function readShortcutState(): Promise<ShortcutQueryResult | null> {
   const response: unknown = await browser.runtime
     .sendMessage({ type: 'commands:shortcuts' })
-    .catch(() => undefined);
+    .catch(() => {
+      readRuntimeLastError();
+      return undefined;
+    });
   return isShortcutQueryResult(response) ? response : null;
 }
 
@@ -146,9 +163,10 @@ function composePreferencesFor(
 }
 
 async function requestSiteAccess(host: string): Promise<boolean> {
-  const response = await browser.runtime
-    .sendMessage({ type: 'site:grant', host })
-    .catch(() => false);
+  const response = await browser.runtime.sendMessage({ type: 'site:grant', host }).catch(() => {
+    readRuntimeLastError();
+    return false;
+  });
   return response === true;
 }
 
@@ -316,11 +334,20 @@ function overlayLabels(): OverlayLabels {
     barRate: (tokens, segments) => t('pageRate', [tokens, segments]),
     barDone: t('pageTranslated'),
     barPartial: (blocks) => t('pagePartial', [String(blocks)]),
+    modelMissing: t('modelSelectionMissing'),
     barOriginal: t('restoreThisPage'),
     barAlways: t('alwaysTranslateSite'),
     engineFailed: t('localServerFailed'),
+    folderPermission: t('modelFolderPermissionPage'),
+    folderEnableTitle: t('modelFolderEnableOneClick'),
     barAlwaysOn: t('pageAlwaysOn'),
   };
+}
+
+function openFolderEnableWindow(): void {
+  void browser.runtime.sendMessage({ type: 'folder:open-enable' }).catch(() => {
+    readRuntimeLastError();
+  });
 }
 
 function getPageInfo(): PageInfo {
@@ -368,8 +395,12 @@ export function contentMain(): void {
     removeOwnedMailBannerHosts(document, instanceToken);
     document.documentElement.removeAttribute(CONTENT_INSTANCE_DOC_ATTR);
   };
+  installContentPortLifecycle();
   installContentInvalidationCleanup(teardownAfterInvalidation);
   let modelState: ModelStatus['state'] | null = null;
+  let activeModelId: ModelStatus['id'] | null = null;
+  let modelRemoved = false;
+  let folderNeedsUserAction = false;
   let plamoReady = false;
   let modelStatusKnown = false;
   const publishPageShortcut = (): void => {
@@ -402,6 +433,9 @@ export function contentMain(): void {
   // Re-read when the tab is shown so a change in chrome://extensions/shortcuts lands.
   window.addEventListener('focus', scheduleShortcutRefresh);
   document.addEventListener('visibilitychange', scheduleShortcutRefresh);
+  window.addEventListener('pageshow', (event) => {
+    if (event.persisted) scheduleShortcutRefresh();
+  });
 
   let engineSource: Settings['engineSource'] = 'in-browser';
   const engine = {
@@ -417,6 +451,10 @@ export function contentMain(): void {
     },
   };
 
+  const pageCommandBridge: { deliver: ((command: PageCommandName) => void) | null } = {
+    deliver: null,
+  };
+
   const sessionPromise = (async () => {
     const settings = await loadSettings();
     let liveSettings = settings;
@@ -427,6 +465,8 @@ export function contentMain(): void {
       const status = await requestEngineStatus().catch(() => null);
       if (!status) return false;
       modelState = status.model.state;
+      activeModelId = status.model.id;
+      folderNeedsUserAction = sharedFolderNeedsUserAction(status);
       plamoReady = status.plamoReady;
       modelStatusKnown = true;
       return true;
@@ -437,6 +477,8 @@ export function contentMain(): void {
     const session = new PageSession(document, {
       engine,
       labels: overlayLabels(),
+      folderGrantUiActive: folderNeedsUserAction,
+      onFolderEnable: openFolderEnableWindow,
       preferences: preferencesFor(settings, rule, host),
       onSitePatch: async (patch) => {
         const current = await loadSiteRule(host);
@@ -459,6 +501,7 @@ export function contentMain(): void {
           shortcutsEnabled,
           'translate-selection',
         )(event),
+      onPageCommand: (command) => pageCommandBridge.deliver?.(command),
     });
     const readiness = composeReadiness(
       settings,
@@ -488,7 +531,9 @@ export function contentMain(): void {
         if (!__SAKUTTO_FAKE_ENGINE__) void requestEngineWarm();
       },
       onSetup: () => {
-        void browser.runtime.sendMessage({ type: 'ui:open-setup' }).catch(() => undefined);
+        void browser.runtime.sendMessage({ type: 'ui:open-setup' }).catch(() => {
+          readRuntimeLastError();
+        });
       },
       onTarget: (language: TargetLanguage) => {
         if (!isTargetLanguage(language)) return;
@@ -697,7 +742,16 @@ export function contentMain(): void {
     return session;
   })();
 
-  const run = async (command: PageCommandName) => {
+  /** Refresh the folder-grant gate after a model/folder transition, not on every chunk. */
+  const refreshFolderGrantUi = async (): Promise<void> => {
+    const status = await requestEngineStatus().catch(() => null);
+    if (!status) return;
+    folderNeedsUserAction = sharedFolderNeedsUserAction(status);
+    const session = await sessionPromise;
+    session.setFolderGrantUiActive(folderNeedsUserAction);
+  };
+
+  const run = async (command: PageCommandName, selection?: PageSelectionSnapshot | null) => {
     const now = Date.now();
     // Compose re-entry is owned by the controller so a Chrome command that found no field
     // cannot swallow the page keydown (or a second command) that does.
@@ -719,20 +773,79 @@ export function contentMain(): void {
       if (shouldHandleComposeCommand(document)) compose?.handleShortcut();
       return session.state();
     }
+    const armed = await armFolderCommand(command);
+    if (armed === 'deferred') {
+      session.beginFolderGrantWait();
+      return session.state();
+    }
+    if (command === 'selection' && selection) {
+      // The menu may have collapsed the document selection while the arm round-trip ran.
+      session.translateSelection(selection.text, selection.rect);
+      return session.state();
+    }
     await session.handle(command);
     return session.state();
+  };
+  pageCommandBridge.deliver = (command) => {
+    const selection = command === 'selection' ? capturePageSelection(document) : null;
+    void run(command, selection);
   };
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (sender.id !== browser.runtime.id) return;
+    if (isFolderGrantCompleteMessage(message)) {
+      void sessionPromise.then(async (session) => {
+        session.endFolderGrantWait();
+        await refreshFolderGrantUi();
+      });
+      return;
+    }
+    if (isFolderGrantNeededMessage(message)) {
+      folderNeedsUserAction = true;
+      void sessionPromise.then((session) => {
+        session.setFolderGrantUiActive(true);
+        session.beginFolderGrantWait();
+      });
+      return;
+    }
     if (isPageInfoRequest(message)) {
       sendResponse(getPageInfo());
       return;
     }
     if (isModelProgressMessage(message)) {
-      modelState = message.status.state;
-      modelStatusKnown = true;
-      if (message.status.state === 'loaded') plamoReady = true;
+      const status = message.status;
+      // `ready` now reaches pages too. Ignore one for a model that is merely installed but
+      // not the active translation model; only a delete recovery may adopt a different id.
+      if (
+        status.state === 'ready' &&
+        !modelRemoved &&
+        activeModelId !== null &&
+        status.id !== activeModelId
+      ) {
+        return;
+      }
+      const removedActiveModel =
+        status.state === 'absent' && (activeModelId === null || status.id === activeModelId);
+      const modelReturned = modelRemoved && (status.state === 'loaded' || status.state === 'ready');
+
+      if (status.state === 'absent') {
+        if (removedActiveModel) {
+          activeModelId = null;
+          modelState = 'absent';
+          modelStatusKnown = true;
+          plamoReady = false;
+          modelRemoved = true;
+        }
+      } else {
+        modelState = status.state;
+        modelStatusKnown = true;
+        if (status.state === 'loaded' || status.state === 'ready') {
+          activeModelId = status.id;
+          if (status.state === 'loaded') plamoReady = true;
+        }
+      }
+      if (modelReturned) modelRemoved = false;
+
       void sessionPromise.then(async (session) => {
         const [nextSettings, nextRule] = await Promise.all([loadSettings(), loadSiteRule(host)]);
         const readiness = composeReadiness(nextSettings, message.status, plamoReady, true);
@@ -752,20 +865,51 @@ export function contentMain(): void {
             ),
           ),
         );
-        if (message.status.state === 'loaded' && !__SAKUTTO_FAKE_ENGINE__) {
+        let missingAfterRemoval = false;
+        if (removedActiveModel && modelRemoved) {
+          const current = await requestEngineStatus().catch(() => null);
+          if (current && modelRemovalOutcome(status, current.model) === 'recovered') {
+            activeModelId = current.model.id;
+            modelState = current.model.state;
+            modelStatusKnown = true;
+            plamoReady = current.plamoReady;
+            folderNeedsUserAction = sharedFolderNeedsUserAction(current);
+            modelRemoved = false;
+            session.setFolderGrantUiActive(folderNeedsUserAction);
+            session.retryUntranslated();
+          } else {
+            missingAfterRemoval = true;
+          }
+        }
+        if (missingAfterRemoval) session.noteModelMissing();
+        if (modelReturned) session.retryUntranslated();
+        if (message.status.error === FOLDER_PERMISSION_ERROR) {
+          folderNeedsUserAction = true;
+          session.setFolderGrantUiActive(true);
+          session.noteFolderPermission();
+        }
+        if (
+          (message.status.state === 'loaded' || message.status.state === 'ready') &&
+          !__SAKUTTO_FAKE_ENGINE__
+        ) {
           void requestEngineTier(session, true, captions);
+          if (!removedActiveModel) await refreshFolderGrantUi();
         }
       });
       return;
     }
-    if (!isPageCommandRequest(message) && !isPageStateRequest(message)) return;
-
-    void sessionPromise.then(async (session) => {
-      if (isPageStateRequest(message)) {
+    if (isPageStateRequest(message)) {
+      void sessionPromise.then((session) => {
         sendResponse(session.state());
-        return;
-      }
-      if (isPageCommandRequest(message)) sendResponse(await run(message.command));
+      });
+      return true;
+    }
+    if (!isPageCommandRequest(message)) return;
+    // Capture before the first await: opening a context menu can clear the selection while
+    // the background arm round-trip is still running.
+    const selection = message.command === 'selection' ? capturePageSelection(document) : null;
+    void sessionPromise.then(async () => {
+      sendResponse(await run(message.command, selection));
     });
     return true;
   });

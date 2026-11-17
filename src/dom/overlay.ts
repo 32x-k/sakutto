@@ -104,6 +104,12 @@ export interface OverlayLabels {
   barAlwaysOn: string;
   /** Shown when a local-server request fails; original page text stays. */
   engineFailed?: string;
+  /** Shown when the active model was deleted while the page was translating. */
+  modelMissing?: string;
+  /** Shown when the shared folder grant is missing; points at the popup restore button. */
+  folderPermission?: string;
+  /** One-click grant control label (iframe page uses its own copy). */
+  folderEnableTitle?: string;
 }
 
 /**
@@ -472,6 +478,11 @@ export class PageOverlay {
   private readonly barText: HTMLElement;
   private readonly barOriginal: HTMLButtonElement;
   private readonly barAlways: HTMLButtonElement;
+  private readonly folderEnableHost: HTMLElement;
+  private readonly folderEnableShadow: ShadowRoot;
+  private readonly folderEnableHint: HTMLElement;
+  private readonly folderEnableButton: HTMLButtonElement;
+  private onFolderEnable: (() => void) | undefined;
   private labels: OverlayLabels;
   private returnFocus: HTMLElement | null = null;
   private onClose: (() => void) | null = null;
@@ -564,6 +575,50 @@ export class PageOverlay {
     this.status.hidden = true;
     doc.documentElement.append(this.status);
 
+    this.folderEnableHost = doc.createElement('sakutto-folder-enable');
+    this.folderEnableHost.setAttribute('translate', 'no');
+    this.folderEnableHost.hidden = true;
+    this.folderEnableHost.style.display = 'none';
+    this.folderEnableHost.style.position = 'fixed';
+    this.folderEnableHost.style.zIndex = '2147483646';
+    this.folderEnableHost.style.left = '16px';
+    this.folderEnableHost.style.right = '16px';
+    this.folderEnableHost.style.bottom = '16px';
+    this.folderEnableHost.style.maxWidth = '320px';
+    this.folderEnableHost.style.minWidth = '280px';
+    this.folderEnableHost.style.minHeight = '64px';
+    this.folderEnableHost.style.margin = '0 auto';
+    this.folderEnableHost.style.border = '1px solid rgb(15 23 32 / 12%)';
+    this.folderEnableHost.style.borderRadius = '10px';
+    this.folderEnableHost.style.boxShadow = '0 8px 24px rgb(15 23 32 / 18%)';
+    this.folderEnableHost.style.background = '#ffffff';
+    this.folderEnableHost.style.opacity = '1';
+    doc.documentElement.append(this.folderEnableHost);
+    this.folderEnableShadow = attachUiShadow(this.folderEnableHost);
+    const folderStyle = doc.createElement('style');
+    folderStyle.textContent = `
+      .panel { display: grid; gap: 8px; padding: 10px 12px; color: #101828; font: 12px/1.4 system-ui, sans-serif; }
+      .hint { margin: 0; }
+      .button { padding: 8px 10px; border: 0; border-radius: 8px; background: #0e7490; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+    `;
+    const panel = doc.createElement('div');
+    panel.className = 'panel';
+    this.folderEnableHint = doc.createElement('p');
+    this.folderEnableHint.className = 'hint';
+    this.folderEnableHint.textContent = this.labels.folderPermission ?? '';
+    this.folderEnableButton = doc.createElement('button');
+    this.folderEnableButton.type = 'button';
+    this.folderEnableButton.className = 'button';
+    this.folderEnableButton.textContent = this.labels.folderEnableTitle ?? '';
+    this.folderEnableButton.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.isTrusted) return;
+      this.onFolderEnable?.();
+    });
+    panel.append(this.folderEnableHint, this.folderEnableButton);
+    this.folderEnableShadow.append(folderStyle, panel);
+
     this.bar = doc.createElement('sakutto-bar');
     this.bar.setAttribute('translate', 'no');
     this.bar.setAttribute('role', 'region');
@@ -651,6 +706,8 @@ export class PageOverlay {
 
   setLabels(labels: OverlayLabels): void {
     this.labels = labels;
+    this.folderEnableHint.textContent = labels.folderPermission ?? '';
+    this.folderEnableButton.textContent = labels.folderEnableTitle ?? '';
     this.tipKicker.textContent = labels.original;
     this.popKicker.textContent = labels.selectionTitle;
     this.popCard.setAttribute('aria-label', labels.selectionTitle);
@@ -723,6 +780,24 @@ export class PageOverlay {
     }, 2600);
   }
 
+  /** Shows the in-page grant hint; the button opens the popup or a grant window. */
+  showFolderEnable(onEnable?: () => void): void {
+    this.onFolderEnable = onEnable;
+    this.folderEnableHost.hidden = false;
+    this.folderEnableHost.style.display = 'block';
+    this.hideBar();
+  }
+
+  hideFolderEnable(): void {
+    this.onFolderEnable = undefined;
+    this.folderEnableHost.hidden = true;
+    this.folderEnableHost.style.display = 'none';
+  }
+
+  folderEnableVisible(): boolean {
+    return !this.folderEnableHost.hidden;
+  }
+
   hideOriginal(): void {
     this.tipHost.hidden = true;
     this.tipHost.style.display = 'none';
@@ -737,6 +812,7 @@ export class PageOverlay {
     wideGapAfterLine?: readonly boolean[],
   ): void {
     const opening = this.popHost.hidden;
+    this.popHost.setAttribute('aria-busy', pending ? 'true' : 'false');
     if (pending) this.popBody.textContent = this.labels.selectionPending;
     else setPlainTextContent(this.popBody, text, wideGapAfterLine);
     this.popBody.lang = lang ?? '';

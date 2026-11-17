@@ -7,8 +7,13 @@
     getModel,
     type ModelId,
   } from '@/engine/model/catalog';
+  import { FOLDER_PERMISSION_ERROR } from '@/engine/model/folder-permission';
+  import { sharedFolderNeedsPermission } from '@/engine/model/folder-status';
+  import { isModelIntegrityError } from '@/engine/model/manager';
+  import { ensureStoredFolderPermission } from '@/engine/model/shared-folder';
   import { modelCanTranslate, type ModelStatus } from '@/shared/engine-status';
   import { hasLicenseConsent } from '@/shared/agreement';
+  import { openOrFocusExtensionTab } from '@/shared/extension-tabs';
   import { t } from '@/shared/i18n';
   import {
     isModelProgressMessage,
@@ -16,6 +21,7 @@
     requestModelCancel,
     requestModelDelete,
     requestModelDownload,
+    requestModelFolderReload,
     requestModelInspect,
     requestModelUse,
   } from '@/shared/messages';
@@ -28,6 +34,8 @@
   let activeId = $state<ModelId | null>(null);
   let fallback = $state(false);
   let busy = $state<ModelId | null>(null);
+  let folderIntegrity = $state<ReadonlySet<ModelId>>(new Set());
+  let folderBlocked = $state(false);
   let anyInstalled = $derived(
     models.some((id) => {
       const state = statuses[id]?.state;
@@ -40,39 +48,80 @@
   }
 
   function apply(status: ModelStatus) {
+    if (status.error === FOLDER_PERMISSION_ERROR) folderBlocked = true;
+    if (isModelIntegrityError(status.error)) {
+      void applyIntegrityStatus(status);
+      return;
+    }
     statuses = { ...statuses, [status.id]: status };
-    if (status.state === 'loaded') activeId = status.id;
+    if (status.state === 'loaded') void syncActive();
+  }
+
+  async function applyIntegrityStatus(status: ModelStatus) {
+    const engine = await requestEngineStatus();
+    folderIntegrity = new Set(
+      engine?.sharedFolder?.integrityIssues.map((issue) => issue.modelId) ?? [],
+    );
+    folderBlocked = sharedFolderNeedsPermission(engine?.sharedFolder);
+    statuses = { ...statuses, [status.id]: status };
+    if (engine) activeId = engine.model.id;
+  }
+
+  async function syncActive() {
+    const engine = await requestEngineStatus();
+    if (engine) activeId = engine.model.id;
+  }
+
+  function errorText(id: ModelId, error: string): string | null {
+    if (error === FOLDER_PERMISSION_ERROR) return null;
+    if (isModelIntegrityError(error)) {
+      // Shared-folder failures are shown once under the folder settings.
+      if (folderIntegrity.has(id)) return null;
+      return t('modelFolderIntegrityFailed', [getModel(id).file]);
+    }
+    return error;
   }
 
   async function refresh() {
-    const engine = await requestEngineStatus();
-    if (engine) {
-      activeId = engine.model.id;
-      fallback = engine.modelFallback === true;
-    }
     const next: Partial<Record<ModelId, ModelStatus>> = { ...statuses };
     for (const id of models) {
       const status = await requestModelInspect(id);
       if (status) next[id] = status;
     }
+    const engine = await requestEngineStatus();
+    if (engine) {
+      activeId = engine.model.id;
+      fallback = engine.modelFallback === true;
+      folderIntegrity = new Set(
+        engine.sharedFolder?.integrityIssues.map((issue) => issue.modelId) ?? [],
+      );
+      folderBlocked = sharedFolderNeedsPermission(engine.sharedFolder);
+    }
     statuses = next;
+  }
+
+  async function ensureFolderPermissionForAction(): Promise<void> {
+    const access = await ensureStoredFolderPermission().catch(() => null);
+    if (access?.status !== 'granted' || !access.changed) return;
+    await requestModelFolderReload();
+    await refresh();
   }
 
   async function download(id: ModelId) {
     const stored = await loadSettings().catch(() => null);
     if (!hasLicenseConsent(stored)) {
-      await browser.tabs
-        .create({ url: browser.runtime.getURL('/onboarding.html') })
-        .catch(() => undefined);
+      void openOrFocusExtensionTab('/onboarding.html');
       return;
     }
     busy = id;
+    await ensureFolderPermissionForAction();
     await requestModelDownload(id);
     busy = null;
   }
 
   async function use(id: ModelId) {
     busy = id;
+    await ensureFolderPermissionForAction();
     const status = await requestModelUse(id);
     if (status) apply(status);
     activeId = id;
@@ -100,7 +149,7 @@
 
 {#if fallback}
   <p class="muted" role="status">{t('modelSelectionFallback')}</p>
-{:else if !anyInstalled && Object.keys(statuses).length > 0}
+{:else if !folderBlocked && !anyInstalled && Object.keys(statuses).length > 0}
   <p class="error" role="alert">{t('modelSelectionMissing')}</p>
 {/if}
 
@@ -122,6 +171,12 @@
         <p class="muted">
           {formatByteSize(status.received)} / {formatByteSize(status.total)}
         </p>
+      {/if}
+      {#if status?.error}
+        {@const message = errorText(id, status.error)}
+        {#if message}
+          <p class="error" role="alert">{message}</p>
+        {/if}
       {/if}
       <div class="actions">
         {#if downloading || verifying}
@@ -154,7 +209,7 @@
           <!-- The file is here and the runtime is reading it. A Download button in this
                state is a start control for something that is already under way. -->
           <p class="muted">{t('runtimeLoading')}</p>
-        {:else}
+        {:else if !folderBlocked}
           <button
             class="button"
             type="button"

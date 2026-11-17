@@ -13,9 +13,9 @@ export interface ProgressSink {
 }
 
 /**
- * `runtime.sendMessage` reaches extension pages only. A translated page hears the
- * loaded state through `tabs.sendMessage`, which is what lets it replace the
- * built-in translation without another click.
+ * Extension UI tabs hear progress through {@link ProgressSink.sendExtension}. Web pages
+ * hear terminal states through `tabs.sendMessage`, which avoids `runtime.sendMessage`
+ * fan-out to BFCache’d content scripts.
  */
 export async function broadcastModelProgress(
   message: ModelProgressMessage,
@@ -27,7 +27,11 @@ export async function broadcastModelProgress(
     // Extension pages may be closed; the page broadcast still runs.
   }
 
-  if (message.status.state !== 'loaded') return;
+  // Download and verify stay on extension UI tabs only; other states reach open web tabs
+  // through tabs.sendMessage so content scripts do not need runtime.sendMessage fan-out.
+  if (message.status.state === 'downloading' || message.status.state === 'verifying') {
+    return;
+  }
 
   let tabs: readonly ProgressTab[];
   try {

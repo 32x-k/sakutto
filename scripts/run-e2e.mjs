@@ -10,7 +10,12 @@ if (playwrightArgs[0] === '--') playwrightArgs.shift();
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: 'inherit', env });
+    const child = spawn(command, args, {
+      stdio: 'inherit',
+      env,
+      // Node on Windows rejects `.cmd` shims (pnpm.cmd) unless spawn uses a shell.
+      shell: process.platform === 'win32',
+    });
     child.on('error', reject);
     child.on('exit', (code) => {
       if (code === 0) resolve();

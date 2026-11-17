@@ -39,6 +39,7 @@ function stored(overrides: Partial<Settings> = {}): Settings {
     plainTextLineBreaks: 'none',
     consent: null,
     highQualityDismissed: false,
+    sharedFolderOfferDismissed: false,
     glossary: [],
     idleMinutes: 5,
     tier: 'auto',
@@ -100,6 +101,23 @@ describe('settings defaults', () => {
     expect(displayLanguage('en', 'ja')).toBe('英語');
     expect(displayLanguage('not-a-language', 'en')).toBe('not-a-language');
     expect(displayLanguage('', 'en')).toBe('');
+  });
+
+  it('leaves the shared-folder move offer visible until the user hides it', () => {
+    expect(
+      normalizeSettings({ schemaVersion: SETTINGS_SCHEMA_VERSION, targetLanguage: 'en' }, 'en-US')
+        .sharedFolderOfferDismissed,
+    ).toBe(false);
+    expect(
+      normalizeSettings(
+        {
+          schemaVersion: SETTINGS_SCHEMA_VERSION,
+          targetLanguage: 'en',
+          sharedFolderOfferDismissed: true,
+        },
+        'en-US',
+      ).sharedFolderOfferDismissed,
+    ).toBe(true);
   });
 
   it('defaults shortcuts on, compose target automatic, and instant replace off', () => {

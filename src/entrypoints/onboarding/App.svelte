@@ -39,6 +39,7 @@
     requestModelCancel,
     requestModelDownload,
     requestEngineWarm,
+    requestModelFolderAdopt,
     requestModelFolderReload,
     requestModelFolderToBrowser,
     requestEngineStatus,
@@ -114,6 +115,7 @@
   let copyProgress = $state<FolderCopyProgress | null>(null);
   let copyController: AbortController | null = null;
   let copyingFolder = $state(false);
+  let readingFolder = $state(false);
   let integrityAlert = $state<string | null>(null);
   let resolvedFolderName = $state<string | null>(null);
   /**
@@ -138,6 +140,8 @@
   let continued = $state(false);
   let marks = $state<ByteMark[]>([]);
   let now = $state(Date.now());
+  /** Set after a Firefox folder copy finished so Start does not open the picker again. */
+  let firefoxCopyDone = $state(false);
 
   /**
    * The keys Chrome has bound right now, so the "you are ready" checklist names the keys the
@@ -244,18 +248,34 @@
 
   function chooseStore(choice: ModelStorageChoiceValue) {
     storeTouched = true;
-    storeChoice = choice;
     pickError = null;
+    storeChoice = choice;
   }
+
+  type FirefoxFolderPickOutcome = 'cancelled' | 'copied' | 'needs-download';
 
   function cancelFolderCopy(): void {
     copyController?.abort();
   }
 
-  async function copyFromFirefoxFolder(): Promise<boolean> {
+  async function copyFromFirefoxFolder(): Promise<FirefoxFolderPickOutcome> {
     // `pickDirectoryFiles` clicks the input synchronously, inside the start click.
-    const files = await pickDirectoryFiles(copyInput);
-    if (!files) return false;
+    readingFolder = false;
+    let files: File[] | null;
+    try {
+      files = await pickDirectoryFiles(copyInput, window, {
+        onAwaitingFiles: () => {
+          readingFolder = true;
+        },
+      });
+    } finally {
+      readingFolder = false;
+    }
+    if (!files) return 'cancelled';
+    if (files.length === 0) {
+      pickError = t('modelStorageNoModels');
+      return 'needs-download';
+    }
 
     copyingFolder = true;
     copyController = new AbortController();
@@ -271,22 +291,28 @@
           copyProgress = item;
         },
       });
+      if (result.discovered.length === 0) {
+        pickError = t('modelStorageNoModels');
+        return 'needs-download';
+      }
       if (result.imported.length === 0) {
         pickError =
           result.failed.length > 0 ? t('modelStorageCopyFailed') : t('modelStorageNoModels');
-        return false;
+        return 'needs-download';
       }
       await requestModelFolderReload();
       await requestEngineWarm();
       const inspected = await requestModelInspect(DEFAULT_MODEL_ID);
       if (inspected) applyStatus(inspected);
       if (result.failed.length > 0) pickError = t('modelStorageSomeCopiesFailed');
-      return true;
+      firefoxCopyDone = true;
+      return 'copied';
     } catch (copyError) {
-      if (!isAbortError(copyError) && !copyController.signal.aborted) {
-        pickError = t('modelStorageCopyFailed');
+      if (isAbortError(copyError) || copyController?.signal.aborted) {
+        return 'cancelled';
       }
-      return false;
+      pickError = t('modelStorageCopyFailed');
+      return 'needs-download';
     } finally {
       copyingFolder = false;
       copyController = null;
@@ -296,7 +322,7 @@
   }
 
   async function start() {
-    if (phase === 'downloading' || copyingFolder) return;
+    if (phase === 'downloading' || copyingFolder || readingFolder) return;
     if (startRequested && phase !== 'paused' && phase !== 'error') return;
     failureDetail = null;
     pickError = null;
@@ -304,18 +330,29 @@
     integrityAlert = null;
 
     if (!storeTouched) {
-      const latest = await requestEngineStatus().catch(() => null);
-      if (latest?.sharedFolder) engineFolder = latest.sharedFolder;
-      storeChoice = defaultOnboardingStoreChoice(pickerAvailable);
+      if (!pickerAvailable) {
+        storeChoice = 'copy';
+      } else {
+        const latest = await requestEngineStatus().catch(() => null);
+        if (latest?.sharedFolder) engineFolder = latest.sharedFolder;
+        storeChoice = defaultOnboardingStoreChoice(pickerAvailable);
+      }
     }
 
+    let skipDownload = modelState === 'ready' || modelState === 'loaded';
+
     if (!pickerAvailable && storeChoice === 'copy') {
-      if (!(await copyFromFirefoxFolder())) return;
-      storeChoice = 'browser';
+      if (firefoxCopyDone || skipDownload) {
+        storeChoice = 'browser';
+      } else {
+        const outcome = await copyFromFirefoxFolder();
+        if (outcome === 'cancelled') return;
+        storeChoice = 'browser';
+        skipDownload = modelState === 'ready' || modelState === 'loaded';
+      }
     }
 
     const downloadChoice: OnboardingStoreChoice = storeChoice === 'copy' ? 'browser' : storeChoice;
-    let skipDownload = modelState === 'ready' || modelState === 'loaded';
     let pendingFolder: { handle: FileSystemDirectoryHandle; name: string } | null = null;
     const keepExistingFolder =
       pickerAvailable && storeChoice === 'folder' && engineFolder.configured && !retryPick;
@@ -419,7 +456,7 @@
 
     if (pendingFolder) {
       await persistSharedFolderHandle(pendingFolder.handle);
-      const folder = await requestModelFolderReload();
+      const folder = await requestModelFolderAdopt();
       const issue = folder?.integrityIssues.find((item) => item.modelId === DEFAULT_MODEL_ID);
       if (issue) {
         await clearStoredSharedFolder();
@@ -429,14 +466,13 @@
         phase = 'consent';
         return;
       }
-      await requestEngineWarm();
+      if (folder) engineFolder = folder;
       const inspected = await requestModelInspect(DEFAULT_MODEL_ID);
       if (inspected && (inspected.state === 'ready' || inspected.state === 'loaded')) {
         skipDownload = true;
         modelState = inspected.state;
       }
     } else if (keepExistingFolder) {
-      await requestEngineWarm();
       const inspected = await requestModelInspect(DEFAULT_MODEL_ID);
       if (inspected && (inspected.state === 'ready' || inspected.state === 'loaded')) {
         skipDownload = true;
@@ -710,8 +746,8 @@
           recommended={pickerAvailable ? 'folder' : 'copy'}
           notes={pickerAvailable ? chromiumNotes : firefoxNotes}
           benefits={storageBenefits}
-          disabled={copyingFolder}
-          onChoose={chooseStore}
+          disabled={copyingFolder || readingFolder}
+          onChoose={(choice) => void chooseStore(choice)}
         />
         {#if !pickerAvailable}
           <input
@@ -722,6 +758,11 @@
             webkitdirectory
             multiple
           />
+        {/if}
+        {#if readingFolder && !copyingFolder}
+          <div class="storage-progress" role="status">
+            <p class="muted">{t('modelFolderReading')}</p>
+          </div>
         {/if}
         {#if copyingFolder}
           <div class="storage-progress" role="status">
@@ -786,7 +827,7 @@
           class="button"
           type="button"
           onclick={start}
-          disabled={closing || copyingFolder}
+          disabled={closing || copyingFolder || readingFolder}
           aria-describedby={showStartNotice ? 'start-notice' : undefined}
         >
           {consentSaved

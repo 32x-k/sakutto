@@ -202,8 +202,6 @@ describe('locale messages', () => {
       'ブラウザのデータを消してもファイルは残る。同じフォルダを選べば再ダウンロード不要',
     );
     expect(en.modelFolderBenefitKeep?.message).toMatch(/pick the same folder/i);
-    expect(en.modelFolderHeading?.message).toBe('Share the model folder across Chromium browsers');
-    expect(ja.modelFolderHeading?.message).toBe('Chromiumブラウザ間でモデルフォルダを共有する');
     expect(en.modelFolderPickerHint?.message).toBe(
       'The folder picker starts in Documents. Create or choose a folder named “Sakutto” there (for example Documents/Sakutto), or choose any folder you can write to.',
     );
@@ -216,12 +214,41 @@ describe('locale messages', () => {
     expect(ja.onboardingStoreFolderHelp?.message).toBe(
       'Chrome や Edge など複数の Chromium ブラウザで使う人向けです。モデルは1つで済みます。',
     );
-    expect(en.onboardingStoreFolder?.message).toBe('Use a shared model folder (Chromium browsers)');
-    expect(ja.onboardingStoreFolder?.message).toBe('共有モデルフォルダを使う（Chromiumブラウザ）');
-    expect(en.onboardingStoreBrowser?.message).toBe('Save in this browser (recommended)');
-    expect(ja.onboardingStoreBrowser?.message).toBe('このブラウザ内に保存する（おすすめ）');
-    expect(en.modelFolderHelp?.message).toBe('The default is still storage inside this browser.');
-    expect(ja.modelFolderHelp?.message).toBe('既定はこれまでどおり、このブラウザ内への保存です。');
+    expect(en.onboardingStoreFolder?.message).toBe(
+      'Use a shared model folder (Chromium browsers) (recommended)',
+    );
+    expect(ja.onboardingStoreFolder?.message).toBe(
+      '共有モデルフォルダを使う（Chromiumブラウザ）（おすすめ）',
+    );
+    expect(en.onboardingStoreBrowser?.message).toBe('Save in this browser');
+    expect(ja.onboardingStoreBrowser?.message).toBe('このブラウザ内に保存する');
+    expect(en.modelStorageLegend?.message).toBe('Where to save the model');
+    expect(ja.modelStorageLegend?.message).toBe('モデルの保存先');
+    expect(en.modelStorageFolder?.message).toBe('Shared folder (recommended)');
+    expect(ja.modelStorageFolder?.message).toBe('共有フォルダ（おすすめ）');
+    expect(en.modelStorageBrowser?.message).toBe('In this browser');
+    expect(ja.modelStorageBrowser?.message).toBe('このブラウザ内');
+    expect(en.modelStorageCopyFolder?.message).toBe('Copy from shared folder (recommended)');
+    expect(ja.modelStorageCopyFolder?.message).toBe('共有フォルダからコピー（おすすめ）');
+    expect(en.modelStorageFirefoxCopyHint?.message).toMatch(/copied into Firefox/i);
+    expect(ja.modelStorageFirefoxCopyHint?.message).toContain('Firefox 内にコピー');
+    expect(en.modelStorageMoveFailed?.message).toMatch(/browser copy was kept/i);
+    expect(ja.modelStorageMoveFailed?.message).toContain('ブラウザ内のコピーは残しています');
+    for (const key of ['modelImportHeading', 'modelImportChoose', 'modelExportMissing']) {
+      expect(en).not.toHaveProperty(key);
+      expect(ja).not.toHaveProperty(key);
+    }
+    expect(en).not.toHaveProperty('modelFolderLocationHint');
+    expect(ja).not.toHaveProperty('modelFolderLocationHint');
+    for (const locale of catalogs) {
+      const messages = readMessages(locale);
+      expect(messages.onboardingStoreFolder?.message, locale).toMatch(/recommended|おすすめ/);
+      expect(messages.onboardingStoreBrowser?.message, locale).not.toMatch(
+        /recommended|おすすめ|empfohlen|recomendado|recommandé|disarankan|consigliato|권장|рекомендуется|แนะนำ|khuyến nghị|推荐|建議/,
+      );
+      expect(messages.modelStorageCopyFolder?.message, locale).toBeTruthy();
+      expect(messages.modelStorageFirefoxCopyHint?.message, locale).toBeTruthy();
+    }
     expect(en.modelFolderPickerHint?.message).toContain('Documents/Sakutto');
     expect(ja.modelFolderPickerHint?.message).toContain('ドキュメント/Sakutto');
     expect(en.modelFolderPickerHint?.message).not.toContain('Documents\\Sakutto');

@@ -253,7 +253,7 @@
     "message": "Save in this browser"
   },
   "onboardingStoreFolder": {
-    "message": "Use a shared model folder (Chromium browsers) (recommended)"
+    "message": "Use a shared model folder (Chromium browsers)"
   },
   "onboardingStoreFolderHelp": {
     "message": "For people who use Chrome, Edge, or another Chromium browser: one model copy is shared between them."
@@ -677,20 +677,23 @@
   "modelStorageLegend": {
     "message": "Where to save the model"
   },
+  "storageOptionRecommended": {
+    "message": "Recommended"
+  },
   "modelStorageFolder": {
-    "message": "Shared folder (recommended)"
+    "message": "Shared folder"
   },
   "modelStorageBrowser": {
     "message": "In this browser"
   },
   "modelStorageCopyFolder": {
-    "message": "Copy from shared folder (recommended)"
+    "message": "Copy from shared folder"
   },
   "modelStorageIntro": {
     "message": "Choose where the model is stored. Existing models move with the choice."
   },
   "modelStorageFirefoxCopyHint": {
-    "message": "Firefox cannot keep using the folder, so the models are copied into Firefox."
+    "message": "After you press start, choose the folder containing the models and confirm “Upload”. Firefox copies the models into Firefox instead of keeping the folder linked."
   },
   "modelStorageFirefoxImport": {
     "message": "Import from shared folder"
@@ -726,7 +729,7 @@
     "message": "Model transfer progress"
   },
   "modelFolderPickerHint": {
-    "message": "The folder picker starts in Documents. Create or choose a folder named “Sakutto” there (for example Documents/Sakutto), or choose any folder you can write to."
+    "message": "After you press start, a folder dialog opens in Documents. Create or choose Documents/Sakutto, or choose the existing folder if another browser already has the models. Any folder you can write to also works."
   },
   "modelFolderChoose": {
     "message": "Choose model folder"

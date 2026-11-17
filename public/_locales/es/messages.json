@@ -253,7 +253,7 @@
     "message": "Guardar en este navegador"
   },
   "onboardingStoreFolder": {
-    "message": "Use a shared model folder (Chromium browsers) (recommended)"
+    "message": "Use a shared model folder (Chromium browsers)"
   },
   "onboardingStoreFolderHelp": {
     "message": "For people who use Chrome, Edge, or another Chromium browser: one model copy is shared between them."
@@ -677,20 +677,23 @@
   "modelStorageLegend": {
     "message": "Dónde guardar el modelo"
   },
+  "storageOptionRecommended": {
+    "message": "Recomendado"
+  },
   "modelStorageFolder": {
-    "message": "Carpeta compartida (recomendada)"
+    "message": "Carpeta compartida"
   },
   "modelStorageBrowser": {
     "message": "En este navegador"
   },
   "modelStorageCopyFolder": {
-    "message": "Copiar de la carpeta compartida (recomendado)"
+    "message": "Copiar de la carpeta compartida"
   },
   "modelStorageIntro": {
     "message": "Elige dónde se guarda el modelo. Los modelos existentes se mueven según la elección."
   },
   "modelStorageFirefoxCopyHint": {
-    "message": "Firefox no puede seguir usando la carpeta, así que los modelos se copian dentro de Firefox."
+    "message": "Después de pulsar Iniciar, elige la carpeta que contiene los modelos y confirma «Subir». Firefox copia los modelos en Firefox en lugar de mantener la carpeta vinculada."
   },
   "modelStorageFirefoxImport": {
     "message": "Importar desde una carpeta compartida"
@@ -726,7 +729,7 @@
     "message": "Progreso de la transferencia de modelos"
   },
   "modelFolderPickerHint": {
-    "message": "The folder picker starts in Documents. Create or choose a folder named “Sakutto” there (for example Documents/Sakutto), or choose any folder you can write to."
+    "message": "Después de pulsar Iniciar, se abre un selector de carpetas en Documentos. Crea o elige Documentos/Sakutto, o elige la carpeta existente si otro navegador ya tiene los modelos. También sirve cualquier carpeta en la que puedas escribir."
   },
   "modelFolderChoose": {
     "message": "Choose model folder"

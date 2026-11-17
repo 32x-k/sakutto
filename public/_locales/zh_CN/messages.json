@@ -253,7 +253,7 @@
     "message": "保存在此浏览器中"
   },
   "onboardingStoreFolder": {
-    "message": "Use a shared model folder (Chromium browsers) (recommended)"
+    "message": "Use a shared model folder (Chromium browsers)"
   },
   "onboardingStoreFolderHelp": {
     "message": "For people who use Chrome, Edge, or another Chromium browser: one model copy is shared between them."
@@ -677,20 +677,23 @@
   "modelStorageLegend": {
     "message": "模型保存位置"
   },
+  "storageOptionRecommended": {
+    "message": "推荐"
+  },
   "modelStorageFolder": {
-    "message": "共享文件夹（推荐）"
+    "message": "共享文件夹"
   },
   "modelStorageBrowser": {
     "message": "保存在此浏览器中"
   },
   "modelStorageCopyFolder": {
-    "message": "从共享文件夹复制（推荐）"
+    "message": "从共享文件夹复制"
   },
   "modelStorageIntro": {
     "message": "选择模型的保存位置。现有模型会随选择移动。"
   },
   "modelStorageFirefoxCopyHint": {
-    "message": "Firefox 无法继续使用该文件夹，因此模型会复制到 Firefox 中。"
+    "message": "点击开始后，请选择包含模型的文件夹并确认“上传”。Firefox 会将模型复制到 Firefox 中，而不会继续链接该文件夹。"
   },
   "modelStorageFirefoxImport": {
     "message": "从共享文件夹导入"
@@ -726,7 +729,7 @@
     "message": "模型传输进度"
   },
   "modelFolderPickerHint": {
-    "message": "The folder picker starts in Documents. Create or choose a folder named “Sakutto” there (for example Documents/Sakutto), or choose any folder you can write to."
+    "message": "点击开始后，文件夹选择对话框会在“文档”中打开。请创建或选择“文档/Sakutto”；如果其他浏览器已有模型，请选择现有的文件夹。也可以选择任何有写入权限的文件夹。"
   },
   "modelFolderChoose": {
     "message": "Choose model folder"

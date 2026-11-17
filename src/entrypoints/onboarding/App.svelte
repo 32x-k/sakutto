@@ -330,13 +330,11 @@
     integrityAlert = null;
 
     if (!storeTouched) {
-      if (!pickerAvailable) {
-        storeChoice = 'copy';
-      } else {
+      if (pickerAvailable) {
         const latest = await requestEngineStatus().catch(() => null);
         if (latest?.sharedFolder) engineFolder = latest.sharedFolder;
-        storeChoice = defaultOnboardingStoreChoice(pickerAvailable);
       }
+      storeChoice = defaultOnboardingStoreChoice(pickerAvailable);
     }
 
     let skipDownload = modelState === 'ready' || modelState === 'loaded';
@@ -742,7 +740,11 @@
           folderKey={pickerAvailable ? 'onboardingStoreFolder' : 'modelStorageCopyFolder'}
           browserKey="onboardingStoreBrowser"
           recommended={pickerAvailable ? 'folder' : 'copy'}
-          notes={pickerAvailable ? chromiumNotes : firefoxNotes}
+          notes={storeChoice === (pickerAvailable ? 'folder' : 'copy')
+            ? pickerAvailable
+              ? chromiumNotes
+              : firefoxNotes
+            : []}
           benefits={storageBenefits}
           disabled={copyingFolder || readingFolder}
           onChoose={(choice) => void chooseStore(choice)}

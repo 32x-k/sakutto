@@ -67,14 +67,30 @@ describe('start controls while the model downloads', () => {
     expect(source('engine/offscreen/host.ts')).toContain('if (!snapshot?.consented)');
   });
 
-  it('preselects the shared folder on onboarding when the picker is available', () => {
+  it('defaults to browser storage and puts browser-first choices above the actions', () => {
     const store = source('ui/onboarding-store.ts');
-    expect(store).toContain("if (pickerAvailable) return 'folder'");
-    expect(store).toContain("return 'copy'");
-    expect(source('ui/ModelStorageChoice.svelte')).toContain('data-store-recommended');
+    expect(store).toContain("return 'browser'");
+    expect(store).not.toContain("return 'folder'");
+    expect(store).not.toContain("return 'copy'");
+    const storageChoice = source('ui/ModelStorageChoice.svelte');
+    expect(storageChoice).toContain('data-store-recommended');
+    expect(storageChoice).toContain("t('storageOptionRecommended')");
+    expect(storageChoice).not.toContain('.store-option.recommended');
+    expect(storageChoice.indexOf('value="browser"')).toBeLessThan(
+      storageChoice.indexOf('value={mode}'),
+    );
     expect(onboarding).toContain('<ModelStorageChoice');
     expect(onboarding).toContain("recommended={pickerAvailable ? 'folder' : 'copy'}");
     expect(onboarding).toContain('onboardingStoreFolderHelp');
+    expect(onboarding).toContain("storeChoice === (pickerAvailable ? 'folder' : 'copy')");
+    const consent = onboarding.indexOf('<section class="panel consent"');
+    const startNotice = onboarding.indexOf('<p id="start-notice"');
+    const actions = onboarding.indexOf('<div class="action-row">');
+    const choices = onboarding.indexOf('<ModelStorageChoice\n');
+    expect(consent).toBeGreaterThan(-1);
+    expect(choices).toBeGreaterThan(consent);
+    expect(startNotice).toBeGreaterThan(choices);
+    expect(actions).toBeGreaterThan(startNotice);
   });
 
   it('handles translator pack failures and skips unnecessary installs', () => {

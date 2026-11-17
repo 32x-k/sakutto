@@ -253,7 +253,7 @@
     "message": "このブラウザ内に保存する"
   },
   "onboardingStoreFolder": {
-    "message": "共有モデルフォルダを使う（Chromiumブラウザ）（おすすめ）"
+    "message": "共有モデルフォルダを使う（Chromiumブラウザ）"
   },
   "onboardingStoreFolderHelp": {
     "message": "Chrome や Edge など複数の Chromium ブラウザで使う人向けです。モデルは1つで済みます。"
@@ -677,20 +677,23 @@
   "modelStorageLegend": {
     "message": "モデルの保存先"
   },
+  "storageOptionRecommended": {
+    "message": "おすすめ"
+  },
   "modelStorageFolder": {
-    "message": "共有フォルダ（おすすめ）"
+    "message": "共有フォルダ"
   },
   "modelStorageBrowser": {
     "message": "このブラウザ内"
   },
   "modelStorageCopyFolder": {
-    "message": "共有フォルダからコピー（おすすめ）"
+    "message": "共有フォルダからコピー"
   },
   "modelStorageIntro": {
     "message": "モデルの保存先を選びます。既存のモデルは選択に合わせて移動します。"
   },
   "modelStorageFirefoxCopyHint": {
-    "message": "Firefox はフォルダを継続利用できないため、モデルを Firefox 内にコピーします。"
+    "message": "「ライセンスに同意して開始」を押すとフォルダ選択が開きます。モデルがあるフォルダを選び、「アップロード」を確認してください。Firefox はフォルダを継続利用せず、モデルを Firefox 内にコピーします。"
   },
   "modelStorageFirefoxImport": {
     "message": "共有フォルダから取り込む"
@@ -726,7 +729,7 @@
     "message": "モデルの移動・コピーの進行状況"
   },
   "modelFolderPickerHint": {
-    "message": "フォルダ選択はドキュメントで開きます。「Sakutto」というフォルダを作成するか選んでください（例：ドキュメント/Sakutto）。書き込みできる別のフォルダでもかまいません。"
+    "message": "「ライセンスに同意して開始」を押すと、フォルダ選択がドキュメントで開きます。「ドキュメント/Sakutto」を作成するか選んでください。別のブラウザにモデルが既にある場合は、その既存フォルダを選びます。書き込みできる別のフォルダでもかまいません。"
   },
   "modelFolderChoose": {
     "message": "モデルフォルダを選ぶ"

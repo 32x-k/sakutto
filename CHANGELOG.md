@@ -2,6 +2,11 @@
 
 Release sections are added by `pnpm release`. Each section lists commit subjects since the previous `vX.Y.Z` tag.
 
+## [1.7.2] - 2026-11-18
+
+- Fix local-server gating after model delete and per-site rule removal (#126)
+- fix(captions): recover late YouTube caption tokens on Brave (#127)
+
 ## [1.7.1] - 2026-11-18
 
 ### Improvements

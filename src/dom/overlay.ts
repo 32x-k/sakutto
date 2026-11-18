@@ -1,4 +1,5 @@
 import type { EngineKind } from '@/engine/types';
+import { copyTextToClipboard } from '@/shared/clipboard-copy';
 import {
   normalizeTranslationPopupSize,
   normalizeTranslationPopupWidth,
@@ -73,6 +74,12 @@ export interface OverlayLabels {
   selectionIcon: string;
   /** Accessible label for the drag handle on the selection popup. */
   selectionResize: string;
+  /** Accessible label and tooltip for the copy control on the selection popup. */
+  selectionCopy: string;
+  /** Brief confirmation shown after the translated selection was copied. */
+  selectionCopied: string;
+  /** Shown when copying the translated selection failed. */
+  selectionCopyFailed: string;
   close: string;
   bilingualOn: string;
   replaceOn: string;
@@ -195,6 +202,7 @@ const BUBBLE_STYLE = `
   font-size: 0.833em;
 }
 button {
+  box-sizing: border-box;
   margin-top: 0.667em;
   padding: 0.333em 0.667em;
   border: 0;
@@ -206,6 +214,28 @@ button {
   cursor: pointer;
 }
 button:focus-visible { outline: 2px solid #0e7490; outline-offset: 2px; }
+button:disabled { opacity: 0.6; cursor: default; }
+/*
+ * The copy control and the close control are the pair of this row. It stretches both to
+ * the taller box, so the icon-only copy control renders at exactly the close control's
+ * height whatever the locale spells on it, instead of following only its own icon box.
+ * Everything else about the pair comes from the shared button rule above.
+ */
+.controls {
+  display: flex;
+  align-items: stretch;
+}
+.copy {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 0.5em;
+  padding-inline: 0.5em;
+}
+.copy svg { display: block; width: 1.25em; height: 1.25em; }
+.copy .icon-check { display: none; }
+.copy[data-state='copied'] .icon-copy { display: none; }
+.copy[data-state='copied'] .icon-check { display: block; }
+.copy-note[hidden] { display: none; }
 .resize-handle {
   position: absolute;
   z-index: 2;
@@ -370,6 +400,50 @@ function attachUiShadow(host: HTMLElement): ShadowRoot {
 }
 
 /**
+ * The copy control's two glyphs: overlapping sheets for "copy", a tick for the brief
+ * confirmation. Built with DOM constructors like the selection icon, so a page that
+ * requires Trusted Types still gets the whole control.
+ */
+function appendCopyIcons(doc: Document, button: HTMLButtonElement): void {
+  const sheets = doc.createElementNS(SVG_NS, 'svg');
+  sheets.classList.add('icon-copy');
+  sheets.setAttribute('viewBox', '0 0 16 16');
+  sheets.setAttribute('aria-hidden', 'true');
+  const back = doc.createElementNS(SVG_NS, 'path');
+  back.setAttribute('d', 'M11 3.5H5.75A2.25 2.25 0 0 0 3.5 5.75v5.25');
+  back.setAttribute('fill', 'none');
+  back.setAttribute('stroke', 'currentColor');
+  back.setAttribute('stroke-width', '1.6');
+  back.setAttribute('stroke-linecap', 'round');
+  sheets.append(back);
+  const front = doc.createElementNS(SVG_NS, 'rect');
+  front.setAttribute('x', '5.25');
+  front.setAttribute('y', '5.25');
+  front.setAttribute('width', '7.5');
+  front.setAttribute('height', '7.5');
+  front.setAttribute('rx', '1.6');
+  front.setAttribute('fill', 'none');
+  front.setAttribute('stroke', 'currentColor');
+  front.setAttribute('stroke-width', '1.6');
+  sheets.append(front);
+
+  const tick = doc.createElementNS(SVG_NS, 'svg');
+  tick.classList.add('icon-check');
+  tick.setAttribute('viewBox', '0 0 16 16');
+  tick.setAttribute('aria-hidden', 'true');
+  const mark = doc.createElementNS(SVG_NS, 'path');
+  mark.setAttribute('d', 'M4.5 8.5 6.75 10.75 11.5 5.25');
+  mark.setAttribute('fill', 'none');
+  mark.setAttribute('stroke', 'currentColor');
+  mark.setAttribute('stroke-width', '1.8');
+  mark.setAttribute('stroke-linecap', 'round');
+  mark.setAttribute('stroke-linejoin', 'round');
+  tick.append(mark);
+
+  button.append(sheets, tick);
+}
+
+/**
  * Drawn with DOM constructors. `innerHTML` and `DOMParser.parseFromString` are
  * TrustedHTML sinks, so either one throws on pages that require Trusted Types
  * and the content script never attaches.
@@ -454,6 +528,8 @@ export class PageOverlay {
   private readonly popButton: HTMLButtonElement;
   private readonly popResizeLeft: HTMLButtonElement | null;
   private readonly popResizeRight: HTMLButtonElement | null;
+  private readonly popCopy: HTMLButtonElement;
+  private readonly popCopyNote: HTMLElement;
   private readonly status: HTMLElement;
   private readonly bar: HTMLElement;
   private readonly barText: HTMLElement;
@@ -471,6 +547,9 @@ export class PageOverlay {
   private statusTimer: ReturnType<typeof setTimeout> | null = null;
   private lastPopRect: DOMRect | null = null;
   private lastTipRect: DOMRect | null = null;
+  /** The plain-text translation the copy control would copy, kept current by showSelection. */
+  private selectionCopyText = '';
+  private copyTimer: ReturnType<typeof setTimeout> | null = null;
   private popupWidth = 0;
   private onPopupWidth: (widthEm: number) => void = () => undefined;
   private resizing: {
@@ -550,6 +629,8 @@ export class PageOverlay {
     this.popButton = pop.button;
     this.popResizeLeft = pop.resizeLeft;
     this.popResizeRight = pop.resizeRight;
+    this.popCopy = pop.copy;
+    this.popCopyNote = pop.copyNote;
     this.status = doc.createElement('sakutto-status');
     this.status.setAttribute('translate', 'no');
     this.status.setAttribute('role', 'status');
@@ -693,6 +774,7 @@ export class PageOverlay {
     this.popKicker.textContent = labels.selectionTitle;
     this.popCard.setAttribute('aria-label', labels.selectionTitle);
     this.popButton.textContent = labels.close;
+    this.resetCopyFeedback();
     this.iconButton.setAttribute('aria-label', labels.selectionIcon);
     this.iconButton.title = labels.selectionIcon;
     for (const handle of [this.popResizeLeft, this.popResizeRight]) {
@@ -790,11 +872,13 @@ export class PageOverlay {
     engine: EngineKind | null,
     pending: boolean,
     lang?: string,
+    failed = false,
   ): void {
     const opening = this.popHost.hidden;
     this.popHost.setAttribute('aria-busy', pending ? 'true' : 'false');
     if (pending) this.popBody.textContent = this.labels.selectionPending;
     else setPlainTextContent(this.popBody, text);
+    this.updateCopyState(text, pending, failed);
     this.popBody.lang = lang ?? '';
     this.popNote.textContent = pending
       ? ''
@@ -810,11 +894,63 @@ export class PageOverlay {
 
   hideSelection(): void {
     if (this.popHost.hidden && this.popHost.style.display === 'none') return;
+    this.selectionCopyText = '';
+    this.popCopy.disabled = true;
+    this.resetCopyFeedback();
     this.popHost.hidden = true;
     this.popHost.style.display = 'none';
     const back = this.returnFocus;
     this.returnFocus = null;
     back?.focus();
+  }
+
+  /**
+   * Keeps the copy control in step with the popup text. A pending or failed popup offers
+   * nothing to copy; a streaming popup offers the part that has already arrived, so the
+   * reader does not have to wait for the whole translation to finish.
+   */
+  private updateCopyState(text: string, pending: boolean, failed: boolean): void {
+    const copyable = !pending && !failed && text.trim().length > 0;
+    const next = copyable ? text : '';
+    if (next !== this.selectionCopyText) this.resetCopyFeedback();
+    this.selectionCopyText = next;
+    this.popCopy.disabled = !copyable;
+  }
+
+  /** Copies the exact plain text the popup shows, then reports the outcome. */
+  private async copySelectionText(): Promise<void> {
+    const text = this.selectionCopyText;
+    if (!text) return;
+    const view = this.doc.defaultView;
+    const ok = await copyTextToClipboard(text, view?.navigator.clipboard ?? null, this.doc);
+    this.showCopyFeedback(ok);
+  }
+
+  private showCopyFeedback(copied: boolean): void {
+    const message = copied ? this.labels.selectionCopied : this.labels.selectionCopyFailed;
+    this.popCopyNote.textContent = message;
+    this.popCopyNote.hidden = false;
+    if (copied) this.popCopy.dataset.state = 'copied';
+    else delete this.popCopy.dataset.state;
+    this.popCopy.setAttribute('aria-label', message);
+    this.popCopy.title = message;
+    if (this.copyTimer !== null) clearTimeout(this.copyTimer);
+    this.copyTimer = setTimeout(() => {
+      this.copyTimer = null;
+      this.resetCopyFeedback();
+    }, 2600);
+  }
+
+  private resetCopyFeedback(): void {
+    if (this.copyTimer !== null) {
+      clearTimeout(this.copyTimer);
+      this.copyTimer = null;
+    }
+    this.popCopyNote.hidden = true;
+    this.popCopyNote.textContent = '';
+    delete this.popCopy.dataset.state;
+    this.popCopy.setAttribute('aria-label', this.labels.selectionCopy);
+    this.popCopy.title = this.labels.selectionCopy;
   }
 
   showSelectionIcon(anchor: DOMRect): void {
@@ -858,6 +994,7 @@ export class PageOverlay {
 
   destroy(): void {
     if (this.statusTimer !== null) clearTimeout(this.statusTimer);
+    if (this.copyTimer !== null) clearTimeout(this.copyTimer);
     if (this.resizing) this.stopResize(this.resizing.pointerId, this.resizing.capture);
     this.style.remove();
     this.tipHost.remove();
@@ -916,6 +1053,8 @@ export class PageOverlay {
     button: HTMLButtonElement;
     resizeLeft: HTMLButtonElement | null;
     resizeRight: HTMLButtonElement | null;
+    copy: HTMLButtonElement;
+    copyNote: HTMLElement;
   } {
     const shadow = attachUiShadow(host);
     const style = this.doc.createElement('style');
@@ -936,6 +1075,32 @@ export class PageOverlay {
     note.className = 'note';
     card.append(kicker, body, note);
 
+    const copy = this.doc.createElement('button');
+    copy.type = 'button';
+    copy.className = 'copy';
+    copy.setAttribute('aria-label', this.labels.selectionCopy);
+    copy.title = this.labels.selectionCopy;
+    copy.disabled = true;
+    appendCopyIcons(this.doc, copy);
+    copy.hidden = !selectable;
+    copy.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void this.copySelectionText();
+    });
+
+    const copyNote = this.doc.createElement('p');
+    copyNote.className = 'note copy-note';
+    copyNote.setAttribute('role', 'status');
+    copyNote.setAttribute('aria-live', 'polite');
+    copyNote.hidden = true;
+    // Both controls live in one stretched row, so the icon-only box keeps the labeled
+    // box's height instead of only the height of its own glyph.
+    const controls = this.doc.createElement('div');
+    controls.className = 'controls';
+    controls.append(copy);
+    if (selectable) card.append(copyNote, controls);
+
     const button = this.doc.createElement('button');
     button.type = 'button';
     button.textContent = this.labels.close;
@@ -949,7 +1114,7 @@ export class PageOverlay {
         if (this.onClose) this.onClose();
         else this.hideSelection();
       });
-      card.append(button);
+      controls.append(button);
       const makeHandle = (edge: 'left' | 'right'): HTMLButtonElement => {
         const handle = this.doc.createElement('button');
         handle.type = 'button';
@@ -981,7 +1146,7 @@ export class PageOverlay {
     }
 
     shadow.append(style, card);
-    return { body, note, kicker, card, button, resizeLeft, resizeRight };
+    return { body, note, kicker, card, button, resizeLeft, resizeRight, copy, copyNote };
   }
 
   private place(host: HTMLElement, rect: DOMRect, interactive: boolean): void {

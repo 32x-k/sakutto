@@ -2,6 +2,11 @@
 
 Release sections are added by `pnpm release`. Each section lists commit subjects since the previous `vX.Y.Z` tag.
 
+## [1.7.3] - 2026-11-18
+
+- docs: expand v1.7.2 changelog entries
+- fix(captions): bound YouTube empty-track player-response polling (#128)
+
 ## [1.7.2] - 2026-11-18
 
 ### Bug Fixes

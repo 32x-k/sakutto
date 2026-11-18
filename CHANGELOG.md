@@ -4,8 +4,10 @@ Release sections are added by `pnpm release`. Each section lists commit subjects
 
 ## [1.7.2] - 2026-11-18
 
-- Fix local-server gating after model delete and per-site rule removal (#126)
-- fix(captions): recover late YouTube caption tokens on Brave (#127)
+### Bug Fixes
+
+- Local-server translation no longer treats a missing in-browser model as a hard fault after you delete every downloaded model, and the shared-folder grant gate no longer misfires on local-server pages. Options can remove per-site rules. (#126)
+- On Brave, YouTube captions can recover when timedtext tokens arrive late or Shields blocks the first fetch: polling keeps looking for a fresh `pot=` URL, document player data is used when needed, and a short notice explains when Shields may be blocking caption data. (#127)
 
 ## [1.7.1] - 2026-11-18
 

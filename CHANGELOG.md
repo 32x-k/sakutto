@@ -2,6 +2,24 @@
 
 Release sections are added by `pnpm release`. Each section lists commit subjects since the previous `vX.Y.Z` tag.
 
+## [1.7.0] - 2026-11-18
+
+### Features
+
+- On Chromium-based browsers, one downloaded model can now be shared by Chrome, Edge, and multiple browser profiles, so you no longer need a separate copy for each one. Opt in during first-run onboarding or later from Settings > Model storage. When you switch, models already stored in the browser are moved into the shared folder rather than duplicated. (#66, #115, #116, #120)
+
+### Improvements
+
+- On Linux Chrome, diagnostics now show a clearer hint when WebGPU is unavailable, making GPU setup problems easier to understand. (#110)
+- Firefox onboarding now provides clearer guidance for choosing a model storage folder. (#117)
+- Success and error notices when switching model storage are now easier to see in Settings. (#122)
+
+### Bug Fixes
+
+- Downloading no longer stalls when you switch to shared model storage. (#117)
+- After a browser restart, your keyboard shortcut can still open the permission tab for the shared folder. If no shortcut is set, Sakutto now shows a clear notice instead of a change link, and the unreliable in-page shortcut fallback has been removed. (#114, #118, #119)
+- On Radeon and integrated GPUs, automatic mode no longer drops to the CPU immediately. Sakutto now retries WebGPU after a quiet GPU probe and uses clearer labels when it does fall back to the CPU. (#121)
+
 ## [1.6.3] - 2026-11-17
 
 ### Features

@@ -674,6 +674,15 @@
   "modelDelete": {
     "message": "Xóa"
   },
+  "modelDeleteSharedFolder": {
+    "message": "Xóa khỏi trình duyệt này"
+  },
+  "modelDeleteSharedFolderHint": {
+    "message": "Với thư mục dùng chung, thao tác này chỉ xóa mô hình khỏi trình duyệt này. Tệp vẫn còn trong thư mục dùng chung. Để xóa chính tệp đó, hãy xóa nó trong Explorer hoặc Finder."
+  },
+  "modelFolderBravePermissionHint": {
+    "message": "Trên Brave, quyền truy cập thư mục có thể mất hiệu lực sau khi bạn đóng thẻ cấp quyền hoặc khởi động lại trình duyệt. Khi trình duyệt hỏi, hãy chọn Cho phép mỗi lần truy cập (Chrome tiếng Nhật: 「サイトアクセス時は常に許可」). Nếu thông báo này vẫn hiển thị sau khi bạn đã cấp quyền, hãy quay lại đây và cấp quyền lại. Nếu hộp chọn thư mục dùng chung không xuất hiện, hãy đặt brave://flags/#file-system-access-api thành Enabled."
+  },
   "modelSelectionFallback": {
     "message": "Mô hình đã chọn không có trên thiết bị này, nên Sakutto đã chuyển sang mô hình đã cài."
   },

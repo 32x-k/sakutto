@@ -513,6 +513,9 @@
   "runtimePlamoGpuFallbackDevice": {
     "message": "PLaMo · CPU（WebGPU 设备故障）"
   },
+  "runtimePlamoGpuFallbackAdapter": {
+    "message": "PLaMo · CPU（WebGPU 适配器不可用——请重启 Chrome）"
+  },
   "runtimeChrome": {
     "message": "Chrome 内置的翻译"
   },

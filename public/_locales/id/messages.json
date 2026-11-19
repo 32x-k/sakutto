@@ -513,6 +513,9 @@
   "runtimePlamoGpuFallbackDevice": {
     "message": "PLaMo · CPU (perangkat WebGPU gagal)"
   },
+  "runtimePlamoGpuFallbackAdapter": {
+    "message": "PLaMo · CPU (adaptor WebGPU tidak tersedia — mulai ulang Chrome)"
+  },
   "runtimeChrome": {
     "message": "Terjemahan bawaan Chrome"
   },

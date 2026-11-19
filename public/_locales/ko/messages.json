@@ -513,6 +513,9 @@
   "runtimePlamoGpuFallbackDevice": {
     "message": "PLaMo · CPU (WebGPU 장치 오류)"
   },
+  "runtimePlamoGpuFallbackAdapter": {
+    "message": "PLaMo · CPU (WebGPU 어댑터를 사용할 수 없음 — Chrome을 재시작하세요)"
+  },
   "runtimeChrome": {
     "message": "Chrome 내장 번역"
   },

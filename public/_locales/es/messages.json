@@ -513,6 +513,9 @@
   "runtimePlamoGpuFallbackDevice": {
     "message": "PLaMo · CPU (falló el dispositivo WebGPU)"
   },
+  "runtimePlamoGpuFallbackAdapter": {
+    "message": "PLaMo · CPU (adaptador WebGPU no disponible — reinicia Chrome)"
+  },
   "runtimeChrome": {
     "message": "La traducción integrada de Chrome"
   },

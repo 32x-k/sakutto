@@ -6,6 +6,7 @@ import {
   TRANSLATION_POPUP_SIZE_DEFAULT,
   TRANSLATION_POPUP_WIDTH_MIN_EM,
 } from '@/shared/settings';
+import { LINE_TAG } from './render';
 
 /** Custom property carrying the popup text scale on each popup host. */
 export const POPUP_TEXT_SCALE_VAR = '--sakutto-popup-scale';
@@ -112,7 +113,7 @@ export interface OverlayLabels {
  * is only slightly smaller, so it reads as body copy instead of a caption.
  */
 const PAGE_STYLE = `
-sakutto-line {
+${LINE_TAG} {
   display: block;
   margin: 0.2em 0 0.35em;
   color: inherit;
@@ -1299,7 +1300,7 @@ export const PAGE_STYLE_ELEMENT_ID = 'sakutto-style';
  */
 export const TRANSLATION_STYLE_RULES = {
   /** The bilingual line inherits the host color instead of mixing in transparency. */
-  line: /sakutto-line\s*\{[^}]*color:\s*inherit/iu,
+  line: new RegExp(String.raw`${LINE_TAG}\s*\{[^}]*color:\s*inherit`, 'iu'),
   /** The pending marker paints nothing at all, so it cannot dim or un-dim a host block. */
   pending: /\[data-sakutto-pending="1"\]\s*\{[^}]*\}/iu,
   /** Any rule that lowers opacity, which is what used to fade translated text. */

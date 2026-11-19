@@ -70,6 +70,7 @@ import {
 } from './priority';
 import {
   applyTranslation,
+  LINE_TAG,
   paintPlain,
   removeTranslationUi,
   restoreSegment,
@@ -100,6 +101,8 @@ const MAX_PAGE_FAILURES = 2;
 const SELECTION_SETTLE_MS = 48;
 /** A selectionchange that follows pointerup is the same gesture and should not wait out the keyboard delay. */
 const POINTER_RELEASE_WINDOW_MS = 80;
+/** Large selections can wait for an explicit translation instead of scanning the entire DOM. */
+const MAX_SELECTION_SCAN_NODES = 512;
 /**
  * Defensive deduplication for duplicate native command delivery. Toggle would otherwise
  * translate and immediately restore, which looks like the shortcut doing nothing.
@@ -207,11 +210,18 @@ export interface PageSelectionSnapshot {
   rect: DOMRect;
 }
 
+type PageSelection = PageSelectionSnapshot & { range: Range | null };
+
 /** Capture a document selection now; later awaits must not depend on it still existing. */
 export function capturePageSelection(
   doc: Document,
   isOwnUi: (node: Node) => boolean = () => false,
 ): PageSelectionSnapshot | null {
+  const selection = readPageSelection(doc, isOwnUi);
+  return selection && { text: selection.text, rect: selection.rect };
+}
+
+function readPageSelection(doc: Document, isOwnUi: (node: Node) => boolean): PageSelection | null {
   for (const current of collectDocuments(doc)) {
     const selection = current.getSelection?.() ?? current.defaultView?.getSelection() ?? null;
     if (!selection || selection.isCollapsed || selection.rangeCount === 0) continue;
@@ -227,7 +237,11 @@ export function capturePageSelection(
     } catch {
       continue;
     }
-    return { text, rect: selectionViewportRect(range, current, doc) };
+    return {
+      text,
+      rect: selectionViewportRect(range, current, doc),
+      range: selection.rangeCount === 1 ? range : null,
+    };
   }
   return null;
 }
@@ -784,13 +798,12 @@ export class PageSession {
     this.translateSelection(selected.text, selected.rect);
   }
 
-  private readSelection(): PageSelectionSnapshot | null {
-    return capturePageSelection(this.doc, (node) => this.overlay.contains(node));
+  private readSelection(): PageSelection | null {
+    return readPageSelection(this.doc, (node) => this.overlay.contains(node));
   }
 
   /**
-   * Inference starts when the highlight stops moving. The icon only reveals the
-   * popover, so a click does not wait to begin a request that is already running.
+   * Start inference when the highlight stops moving unless the selection is already translated.
    */
   private scheduleSelectionOffer(delayMs: number): void {
     if (this.selectionTimer !== null) clearTimeout(this.selectionTimer);
@@ -826,9 +839,15 @@ export class PageSession {
       this.overlay.moveSelection(selected.rect);
       return;
     }
-    if (this.selectionShown) this.dismissSelection();
+    const prefetch = selected.range === null || this.shouldPrefetchRange(selected.range);
+    if (
+      this.selectionShown ||
+      (!prefetch && this.selection && this.selection.plainSource !== source)
+    ) {
+      this.dismissSelection();
+    }
     this.overlay.showSelectionIcon(selected.rect);
-    this.translateSelection(selected.text, selected.rect, false);
+    if (prefetch) this.translateSelection(selected.text, selected.rect, false);
   }
 
   private activateSelectionIcon(): void {
@@ -1786,7 +1805,7 @@ export class PageSession {
 
       if (bilingual) {
         showBilingual(model, text, item.created);
-        const line = model.block.querySelector('sakutto-line');
+        const line = model.block.querySelector(LINE_TAG);
         if (line instanceof HTMLElement) line.lang = this.prefs.targetLanguage;
         if (!partial || !model.placeholder) model.block.removeAttribute('data-sakutto-pending');
       } else if (partial) {
@@ -2195,6 +2214,49 @@ export class PageSession {
     return element?.closest('[data-sakutto-id]') ?? null;
   }
 
+  private shouldPrefetchRange(range: Range): boolean {
+    const root = range.commonAncestorContainer;
+    if (root.nodeType === Node.TEXT_NODE) return !this.isRenderedText(root as Text);
+
+    const { startContainer, startOffset, endContainer, endOffset } = range;
+    const first =
+      startContainer.nodeType === Node.TEXT_NODE
+        ? startContainer
+        : (startContainer.childNodes[startOffset] ?? nextAfterSubtree(startContainer, root));
+    const after = endContainer.childNodes[endOffset] ?? nextAfterSubtree(endContainer, root);
+
+    let inspected = 0;
+    let foundText = false;
+    for (
+      let node = first;
+      node && node !== after;
+      node = node.firstChild ?? nextAfterSubtree(node, root)
+    ) {
+      if (++inspected > MAX_SELECTION_SCAN_NODES) return false;
+      if (node.nodeType !== Node.TEXT_NODE) continue;
+      const text = node as Text;
+      const start = text === startContainer ? startOffset : 0;
+      const end = text === endContainer ? endOffset : text.length;
+      if (text.data.slice(start, end).trim() === '') continue;
+      if (!this.isRenderedText(text)) return true;
+      foundText = true;
+    }
+    return !foundText;
+  }
+
+  private isRenderedText(text: Text): boolean {
+    const block = this.blockOf(text);
+    const item = block ? this.liveByBlock.get(block) : undefined;
+    if (!item || item.state !== 'done' || item.translation.trim() === '') return false;
+
+    if (this.prefs.display === 'bilingual' && this.keepsOriginalVisible(item)) {
+      const line = text.parentElement;
+      return line?.localName === LINE_TAG && line.parentElement === block;
+    }
+    // Only text nodes that the renderer touched are recorded, including inline slots.
+    return this.expected.get(text) === text.data;
+  }
+
   private refreshBlock(block: Element): void {
     const existing = this.liveByBlock.get(block);
     if (!existing || existing.state === 'running') return;
@@ -2465,6 +2527,14 @@ export class PageSession {
     const waiters = this.idleWaiters.splice(0);
     for (const resolve of waiters) resolve();
   }
+}
+
+/** The next node in document order after all descendants, within the range's root. */
+function nextAfterSubtree(node: Node, root: Node): Node | null {
+  for (let current: Node | null = node; current && current !== root; current = current.parentNode) {
+    if (current.nextSibling) return current.nextSibling;
+  }
+  return null;
 }
 
 function isBodyCopy(block: Element): boolean {

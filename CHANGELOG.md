@@ -2,6 +2,21 @@
 
 Release sections are added by `pnpm release`. Each section lists commit subjects since the previous `vX.Y.Z` tag.
 
+## [1.8.0] - 2026-11-19
+
+### Improvements
+
+- WebGPU translation now decodes much faster, so long articles finish noticeably sooner. The bundled wllama sizes its k-quant matrix–vector workgroups to fit the row on NVIDIA, takes a greedy-sampling fast path that finds the most likely token with an on-GPU argmax instead of sorting the whole vocabulary for every token, returns a result that is already ready without decoding one extra step, and lets flash attention skip KV tiles that every query row has masked out. On the test page decoding runs about 1.5× faster, a full long-article page drops from 3.9 s to 2.5 s, and average throughput rises from 377 to 572 tok/s. Translation quality is unchanged. (#111)
+- The selection translation popup now has a one-click copy button beside its close control. It copies the exact text the popup is showing, line breaks included, so you can copy the finished portion of a streamed translation without waiting for the whole decode. (#129, #132)
+
+### Bug Fixes
+
+- On Brave, models recorded in the shared folder now show their Use and Remove actions in Settings even while the folder permission is still in the prompt state, and the list refreshes once you grant access. Deleting a model in shared-folder mode now removes only Sakutto's browser-side record — the GGUF file stays in the shared folder, and the Settings wording says so. (#130)
+
+### Build
+
+- Stylesheet links in the built HTML entries are now written in one deterministic order, so two package builds from the same source produce identical output and the shipped packages are reproducible. This is a build-level fix and does not change user-facing behavior. (#134)
+
 ## [1.7.3] - 2026-11-18
 
 - docs: expand v1.7.2 changelog entries

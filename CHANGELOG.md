@@ -2,6 +2,37 @@
 
 Release sections are added by `pnpm release`. Each section lists commit subjects since the previous `vX.Y.Z` tag.
 
+## [1.8.1] - 2026-11-19
+
+### Improvements
+
+- Long selection translations now scroll inside the popup instead of covering the window. The popup header and Close control stay visible while you read, and short translations behave exactly as before. (#145, closes #144)
+- Selection prefetch is faster and lighter on large pages. Small selections that are already translated are no longer re-translated in advance, scanning of large selections is bounded so it cannot stall the page, and the background prefetch that runs before you click the icon is preserved. (#141, with thanks to 4ltena; #142)
+
+### Bug Fixes
+
+- On AMD Vega/GCN graphics, WebGPU translation no longer produces broken output. Sakutto now disables the untested fast decode paths on these GPUs and uses the same safe path as v1.3.0; other GPUs are unaffected. (#140)
+- When the WebGPU adapter is unavailable, the status message now suggests fully restarting the browser after driver updates and checking hardware acceleration / chrome://gpu. (#138)
+- Unspaced text is no longer rescanned for email addresses. (#135)
+
+### Performance
+
+- Checking content script readiness no longer triggers a page scan, which removes avoidable work on every page. (#136)
+
+### Docs
+
+- The README now shows contributor avatars for Seyamalam, TKY-27, and 4ltena. (#139, #143)
+
+### 日本語
+
+- 選択翻訳ポップアップ: 長文翻訳はポップアップ内でスクロール表示され、ウィンドウを覆わなくなりました。ヘッダーと閉じるボタンは常に表示され、短い翻訳は従来どおりです。(#145、#144 を解決)
+- 選択プレフェッチ: 大きなページで高速・軽量化。翻訳済みの短い選択範囲を事前に再翻訳しなくなり、大きな選択範囲の走査は上限付き、アイコンクリック前のバックグラウンド事前翻訳は維持されています。(#141、#142、#141 は 4ltena 氏の貢献)
+- AMD Vega/GCN では、未検証の高速デコードパスを無効化し、v1.3.0 と同じ安全なパスを使用。出力が壊れる問題を修正しました。他の GPU への影響はありません。(#140)
+- WebGPU アダプターが利用できない場合、ドライバー更新後はブラウザーを完全に再起動すること、ハードウェアアクセラレーションと chrome://gpu を確認するようステータスが案内します。(#138)
+- スペースなしテキストのメールアドレス再走査を廃止。(#135)
+- コンテンツスクリプト準備確認時にページ走査を行わなくなりました。(#136)
+- README にコントリビューター（Seyamalam、TKY-27、4ltena）のアバターを追加しました。(#139、#143)
+
 ## [1.8.0] - 2026-11-19
 
 ### Improvements

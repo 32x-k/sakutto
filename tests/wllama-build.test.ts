@@ -290,4 +290,60 @@ bool ggml_webgpu_correctness_probe(webgpu_context ctx) {
     expect(patch).not.toMatch(/^[+-].*(subgroupAdd|tile_max|tile_sum)/m);
     expect(patch.match(/^\+\s+workgroupBarrier\(\);$/gm)).toHaveLength(1);
   });
+
+  it('keeps the v1.3.0-safe kernels on AMD/ATI adapters only', () => {
+    const patch = readFileSync(
+      new URL('../scripts/wllama/patches/0015-webgpu-wave64-vendor-gate.patch', import.meta.url),
+      'utf8',
+    );
+    // the gate reads the adapter vendor and architecture through ggml_webgpu_adapter_is_amd()
+    expect(patch).toContain('ggml_webgpu_adapter_is_amd(ctx->webgpu_global_ctx->vendor');
+    expect(patch).toContain('caps.flash_attn_vec        = false;');
+    expect(patch).toContain('caps.wide_subgroup_shuffle = false;');
+    // it runs in the device probe, before any vec dispatch decision, and the log keeps vec=
+    expect(patch).toContain('vec flash-attn off (wave64), tile shader only');
+    expect(patch).toContain('ok vendor=%s subgroups=%s subgroup_size=%u');
+    expect(patch).toContain('wide_shuffle=%s vec=%s');
+    // the 0009 width gate stays, so every non-AMD vendor keeps vec when its probe allows it
+    expect(patch).not.toContain('-        if (subgroup_size > 32u');
+    // the gate is AMD-only: no other vendor is named in a condition
+    expect(patch).not.toContain('!= "nvidia"');
+    expect(patch).not.toContain('== "nvidia"');
+    // no probe kernel and no shader edit: everyone outside AMD pays one string compare
+    const addedLines = patch.split('\n').filter((line) => line.startsWith('+'));
+    expect(addedLines.some((line) => line.includes('static const char * ggml_webgpu_probe'))).toBe(
+      false,
+    );
+    expect(patch).not.toContain('.wgsl');
+    // the 0012 argmax node is off AMD only; AMD keeps the logits readback
+    expect(patch).toContain(
+      'GGML_BACKEND_API bool ggml_backend_webgpu_dev_is_amd(ggml_backend_dev_t dev);',
+    );
+    expect(patch).toContain('bool ggml_backend_webgpu_dev_is_amd(ggml_backend_dev_t dev) {');
+    expect(patch).toContain('!ggml_backend_webgpu_dev_is_amd(model.dev_output())');
+  });
+
+  it('keeps the masked-tile skip off AMD only', () => {
+    const patch = readFileSync(
+      new URL(
+        '../scripts/wllama/patches/0016-webgpu-masked-tile-skip-vendor-gate.patch',
+        import.meta.url,
+      ),
+      'utf8',
+    );
+    // the skip needs its own define, and the pipeline adds it for every adapter except AMD
+    expect(patch).toContain('#if defined(MASK) && defined(SKIP_MASKED_TILES)');
+    expect(patch).toContain('!ggml_webgpu_adapter_is_amd(context.vendor, context.architecture)');
+    expect(patch).toContain('defines.push_back("SKIP_MASKED_TILES");');
+    expect(patch).toContain('variant += "_skipmt";');
+    // without the define the shader compiles the pre-skip flow: every tile staged and scored,
+    // and a row bounded only by its own row_active, the decode of the shipped 1.3.0 build
+    expect(patch).toContain('the decode of the shipped 1.3.0 build');
+    // the 0014 mask scoring stays: the gate removes the skip only, never the mask read
+    expect(patch).not.toMatch(/^[+-].*(local_scores[slot] = FLOAT_MIN)/m);
+    // the gate sits in the tile branch, so the vec and subgroup-matrix paths are untouched
+    expect(patch).toContain('defines.push_back("MAX_SUBGROUP_SIZE="');
+    expect(patch).not.toContain('wgsl_flash_attn_vec');
+    expect(patch).not.toContain('use_sg_matrix');
+  });
 });

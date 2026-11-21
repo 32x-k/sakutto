@@ -36,6 +36,7 @@
   import { resolveTargetLanguage, type TargetLanguage } from '@/shared/languages';
   import {
     isModelProgressMessage,
+    requestModelAttach,
     requestModelCancel,
     requestModelDownload,
     requestEngineWarm,
@@ -71,6 +72,8 @@
     onboardingCanTry,
     onboardingErrorMessage,
     onboardingPhaseAfterStatus,
+    shouldApplyOnboardingPollResult,
+    shouldPollOnboardingProgress,
     type OnboardingPhase,
   } from '@/ui/onboarding-phase';
 
@@ -496,13 +499,70 @@
     }
 
     phase = 'downloading';
+    pollGeneration += 1;
+    pollFailures = 0;
+    lastProgressAt = Date.now();
     const started = await requestModelDownload(DEFAULT_MODEL_ID);
     if (!started) phase = 'error';
   }
 
+  let lastProgressAt = 0;
+  let pollInFlight = false;
+  let pollGeneration = 0;
+  let pollFailures = 0;
+  let disposed = false;
+
+  async function syncDownloadStatus(force = false): Promise<void> {
+    if (disposed || pollInFlight || phase !== 'downloading') return;
+    if (
+      !force &&
+      !shouldPollOnboardingProgress({
+        phase,
+        now: Date.now(),
+        lastProgressAt,
+        inFlight: pollInFlight,
+        failures: pollFailures,
+      })
+    ) {
+      return;
+    }
+    const generation = pollGeneration;
+    pollInFlight = true;
+    try {
+      const status = await requestModelAttach(DEFAULT_MODEL_ID);
+      if (
+        !shouldApplyOnboardingPollResult({
+          disposed,
+          phase,
+          startedGeneration: generation,
+          currentGeneration: pollGeneration,
+        })
+      ) {
+        return;
+      }
+      if (status) {
+        pollFailures = 0;
+        lastProgressAt = Date.now();
+        applyStatus(status);
+      } else {
+        pollFailures += 1;
+        lastProgressAt = Date.now();
+      }
+    } catch {
+      if (!disposed && generation === pollGeneration) {
+        pollFailures += 1;
+        lastProgressAt = Date.now();
+      }
+    } finally {
+      pollInFlight = false;
+    }
+  }
+
   async function pause() {
-    await requestModelCancel(DEFAULT_MODEL_ID);
+    pollGeneration += 1;
+    pollFailures = 0;
     phase = 'paused';
+    await requestModelCancel(DEFAULT_MODEL_ID);
   }
 
   async function trySample() {
@@ -531,13 +591,33 @@
   }
 
   onMount(() => {
+    disposed = false;
     const onMessage = (message: unknown) => {
       if (!isModelProgressMessage(message)) return;
+      if (
+        !shouldApplyOnboardingPollResult({
+          disposed,
+          phase,
+          startedGeneration: pollGeneration,
+          currentGeneration: pollGeneration,
+        })
+      ) {
+        return;
+      }
+      if (message.status.id === DEFAULT_MODEL_ID) {
+        lastProgressAt = Date.now();
+        pollFailures = 0;
+      }
       applyStatus(message.status);
     };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') void syncDownloadStatus(true);
+    };
     browser.runtime.onMessage.addListener(onMessage);
+    document.addEventListener('visibilitychange', onVisibility);
     const timer = setInterval(() => {
       now = Date.now();
+      void syncDownloadStatus();
     }, 1000);
 
     void loadSettings()
@@ -582,7 +662,9 @@
     });
 
     return () => {
+      disposed = true;
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
       browser.runtime.onMessage.removeListener(onMessage);
     };
   });

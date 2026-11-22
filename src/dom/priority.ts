@@ -106,9 +106,10 @@ export function bandForRect(
 }
 
 /**
- * Lower values run first. Selection is 0. Article prose in every band stays
- * ahead of navigation, infoboxes and reference lists, so a tall Wikipedia
- * sidebar cannot take the model before the next paragraph.
+ * Lower values run first. Selection is 0. Within each visibility band, article
+ * prose stays ahead of chrome (navigation, cards, badges), while everything
+ * currently visible in the viewport runs ahead of off-screen (`near` / `far`)
+ * content so graphical dashboards and hero sections translate immediately.
  */
 export function translationPriority(
   band: VisibilityBand | 'selection',
@@ -117,10 +118,20 @@ export function translationPriority(
 ): number {
   if (band === 'selection' || kind === 'selection') return 0;
 
-  const bandRank = band === 'visible' ? 0 : band === 'near' ? 1 : 2;
-  const kindBase = kind === 'prose' ? 10 : 50;
+  const base =
+    band === 'visible'
+      ? kind === 'prose'
+        ? 10
+        : 20
+      : band === 'near'
+        ? kind === 'prose'
+          ? 30
+          : 42
+        : kind === 'prose'
+          ? 54
+          : 66;
   const order = Math.min(Math.max(index, 0), 2000) * 0.004;
-  return Math.max(-100, Math.min(100, Number((kindBase + bandRank * 12 + order).toFixed(2))));
+  return Math.max(-100, Math.min(100, Number((base + order).toFixed(2))));
 }
 
 /**

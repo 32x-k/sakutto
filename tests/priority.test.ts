@@ -9,18 +9,18 @@ import {
 } from '@/dom/priority';
 
 describe('translation priority', () => {
-  it('finishes article prose before navigation and infoboxes', () => {
+  it('finishes visible prose and visible UI before off-screen content', () => {
     const visibleProse = translationPriority('visible', 2000, 'prose');
+    const visibleChrome = translationPriority('visible', 0, 'chrome');
     const nearProse = translationPriority('near', 0, 'prose');
     const farProse = translationPriority('far', 2000, 'prose');
-    const visibleChrome = translationPriority('visible', 0, 'chrome');
     const farChrome = translationPriority('far', 0, 'chrome');
 
     expect(translationPriority('selection', 0, 'prose')).toBe(0);
-    expect(visibleProse).toBeLessThan(nearProse);
+    expect(visibleProse).toBeLessThan(visibleChrome);
+    expect(visibleChrome).toBeLessThan(nearProse);
     expect(nearProse).toBeLessThan(farProse);
-    expect(farProse).toBeLessThan(visibleChrome);
-    expect(visibleChrome).toBeLessThan(farChrome);
+    expect(farProse).toBeLessThan(farChrome);
   });
 
   it('classifies article text as prose and navigation as chrome', () => {

@@ -721,9 +721,7 @@ button.close-btn:hover {
     padding: 3px 8px;
   }
   .bar-always {
-    max-width: 108px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {

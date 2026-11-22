@@ -4142,4 +4142,60 @@ describe('selection offers on a never host and at init', () => {
     const bar = document.querySelector('sakutto-bar');
     expect(uiShadow(bar)?.textContent).toContain('キャッシュ');
   });
+
+  it('keeps in-flight local-server batches running across brief visibilitychange hides', async () => {
+    document.documentElement.lang = 'en';
+    document.body.innerHTML = '<p>First paragraph here</p><p>Second paragraph here</p>';
+    let hidden = false;
+    Object.defineProperty(document, 'hidden', {
+      configurable: true,
+      get: () => hidden,
+    });
+    const releases: (() => void)[] = [];
+    const signals = new Map<string, AbortSignal>();
+
+    const session = new PageSession(document, {
+      engine: engineOf(async function* (segments, options) {
+        const text = segments[0]?.text ?? '';
+        signals.set(text, options.signal);
+        await new Promise<void>((resolve) => {
+          releases.push(resolve);
+        });
+        for (const segment of segments) {
+          yield { id: segment.id, final: `訳:${segment.text}`, engine: 'plamo' as const };
+        }
+      }),
+      labels,
+      preferences: { ...preferences(), engineSource: 'local-server' },
+      scheduleFrame: (callback) => callback(),
+    });
+    sessions.push(session);
+
+    try {
+      void session.translate();
+      for (
+        let attempt = 0;
+        attempt < 50 && (releases.length === 0 || signals.size < 1);
+        attempt += 1
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(signals.size).toBeGreaterThanOrEqual(1);
+      hidden = true;
+      document.dispatchEvent(new Event('visibilitychange'));
+
+      // In-flight local-server requests must not be aborted when the tab briefly hides.
+      for (const signal of signals.values()) {
+        expect(signal.aborted).toBe(false);
+      }
+
+      for (const release of releases) release();
+      hidden = false;
+      document.dispatchEvent(new Event('visibilitychange'));
+      await session.whenIdle();
+      expect(document.body.textContent).toContain('訳:First paragraph here');
+    } finally {
+      Reflect.deleteProperty(document, 'hidden');
+    }
+  });
 });

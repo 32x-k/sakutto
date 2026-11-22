@@ -485,8 +485,12 @@ export class PageSession {
         // A completion the model is decoding runs to its end even when aborted, so the
         // batch it belongs to finishes and paints. Batches still waiting give the engine back.
         // Hidden before the first chunk (still prefilling) aborts the batch and discards
-        // that completion's output.
-        this.abortBatches((batch) => !batch.streaming, true);
+        // that completion's output. For an external local server, keep the 1–2 already
+        // in-flight HTTP requests alive across brief app switches so an NPU prefill or model
+        // load is not aborted mid-flight.
+        if (this.prefs.engineSource !== 'local-server') {
+          this.abortBatches((batch) => !batch.streaming, true);
+        }
         return;
       }
       this.paused = false;
@@ -1609,8 +1613,12 @@ export class PageSession {
           this.discardUnfinishedPaint(item);
         }
       } else if (!signal.aborted && isLocalServerError(error)) {
-        this.serverFault = true;
-        if (this.labels.engineFailed) this.overlay.showStatus(this.labels.engineFailed);
+        if (this.doc.hidden || this.paused) {
+          abortedByEngine = true;
+        } else {
+          this.serverFault = true;
+          if (this.labels.engineFailed) this.overlay.showStatus(this.labels.engineFailed);
+        }
       } else if (!signal.aborted && isFolderPermissionError(error)) {
         this.noteFolderPermission();
       }
@@ -2187,12 +2195,15 @@ export class PageSession {
           : this.labels.barDone;
     const cachedCount = view.cached ?? 0;
     const doneCount = Math.floor(view.done);
-    const withCache =
-      cachedCount > 0 && doneCount > 0 && this.labels.barCached
-        ? `${base} · ${this.labels.barCached(cachedCount, doneCount)}`
+    const hasLiveInference = doneCount > cachedCount || view.pending > 0;
+    const withRate =
+      hasLiveInference && view.tokensPerSecond !== null && view.segmentsPerSecond !== null
+        ? `${base} · ${this.labels.barRate(formatRate(view.tokensPerSecond), formatRate(view.segmentsPerSecond))}`
         : base;
-    if (view.tokensPerSecond === null || view.segmentsPerSecond === null) return withCache;
-    return `${withCache} · ${this.labels.barRate(formatRate(view.tokensPerSecond), formatRate(view.segmentsPerSecond))}`;
+    if (cachedCount > 0 && doneCount > 0 && this.labels.barCached) {
+      return `${withRate} · ${this.labels.barCached(cachedCount, doneCount)}`;
+    }
+    return withRate;
   }
 
   private noteLiveRate(): void {

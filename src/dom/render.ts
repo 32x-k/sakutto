@@ -30,6 +30,7 @@ interface Frame {
 }
 
 export function applyTranslation(model: SegmentModel, translation: string, created: Text[]): void {
+  recordHeadingBaseline(model.block);
   discardCreated(created);
   const parts = parsePlaceholders(translation, placeholderIds(model));
   const root: Frame = { element: model.block, gaps: model.gaps, children: model.children };
@@ -39,6 +40,7 @@ export function applyTranslation(model: SegmentModel, translation: string, creat
     writeFlat(model, stripPlaceholderTokens(translation), created);
   }
   rebalanceLines(root);
+  stabilizeHeadingLayout(model.block);
 }
 
 export function restoreSegment(model: SegmentModel, created: Text[]): void {
@@ -62,11 +64,14 @@ export function restoreStructure(model: SegmentModel, created: Text[]): void {
   removeTranslationUi(model.block);
   restoreChildOrder(ordered(model));
   for (const slot of allSlots(model)) slot.node.nodeValue = slot.original;
+  restoreHeadingBaseline(model.block);
 }
 
 export function paintPlain(model: SegmentModel, translation: string, created: Text[]): void {
+  recordHeadingBaseline(model.block);
   writeFlat(model, visibleTranslation(translation), created);
   rebalanceLines({ element: model.block, gaps: model.gaps, children: model.children });
+  stabilizeHeadingLayout(model.block);
 }
 
 /**
@@ -792,4 +797,114 @@ function removeLegacyNote(block: Element): void {
  */
 export function stripLegacyNotes(root: ParentNode): void {
   for (const note of [...root.querySelectorAll(LEGACY_NOTE_TAG)]) note.remove();
+}
+
+interface HeadingBaseline {
+  hadStyleAttr: boolean;
+  originalStyleAttr: string | null;
+  inlineFontSize: string;
+  baseFontSizePx: number;
+  baseLineCount: number;
+}
+
+const headingBaselines = new WeakMap<HTMLElement, HeadingBaseline>();
+const HEADING_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+
+function isHeadingCandidate(element: Element): element is HTMLElement {
+  if (!(element instanceof HTMLElement)) return false;
+  if (HEADING_TAGS.has(element.localName)) return true;
+  const role = element.getAttribute('role') ?? element.getAttribute('data-type-role');
+  return role === 'heading';
+}
+
+function recordHeadingBaseline(block: Element): void {
+  if (!isHeadingCandidate(block) || headingBaselines.has(block)) return;
+  const view = block.ownerDocument.defaultView;
+  if (!view) return;
+  const rect = block.getBoundingClientRect();
+  if (!(rect.width > 0 && rect.height > 0)) return;
+  const cs = view.getComputedStyle(block);
+  const baseFontSizePx = Number.parseFloat(cs.fontSize);
+  if (!Number.isFinite(baseFontSizePx) || baseFontSizePx < 24) return;
+  const lineHeightPx = Number.parseFloat(cs.lineHeight);
+  const effLineHeight =
+    Number.isFinite(lineHeightPx) && lineHeightPx > 0
+      ? Math.min(lineHeightPx, baseFontSizePx * 1.15)
+      : baseFontSizePx * 1.1;
+  const baseLineCount = Math.max(1, Math.round(rect.height / effLineHeight));
+  headingBaselines.set(block, {
+    hadStyleAttr: block.hasAttribute('style'),
+    originalStyleAttr: block.getAttribute('style'),
+    inlineFontSize: block.style.fontSize,
+    baseFontSizePx,
+    baseLineCount,
+  });
+}
+
+function restoreHeadingBaseline(block: Element): void {
+  if (!(block instanceof HTMLElement)) return;
+  const saved = headingBaselines.get(block);
+  if (!saved) return;
+  if (!saved.hadStyleAttr) {
+    block.removeAttribute('style');
+  } else if (saved.originalStyleAttr !== null) {
+    block.setAttribute('style', saved.originalStyleAttr);
+  } else {
+    block.style.fontSize = saved.inlineFontSize;
+  }
+  headingBaselines.delete(block);
+}
+
+function fitHeadingElement(heading: HTMLElement): void {
+  const baseline = headingBaselines.get(heading);
+  if (!baseline) return;
+  heading.style.fontSize = baseline.inlineFontSize;
+  const rect = heading.getBoundingClientRect();
+  if (!(rect.width > 0 && rect.height > 0)) return;
+  const text = (heading.textContent ?? '').trim();
+  if (!CJK_TEXT.test(text)) return;
+
+  let ems = 0;
+  for (const ch of text) {
+    ems += CJK_TEXT.test(ch) ? 1.02 : 0.55;
+  }
+  const currentLines = Math.max(1, Math.round(rect.height / (baseline.baseFontSizePx * 1.05)));
+  if (currentLines <= baseline.baseLineCount && rect.width >= baseline.baseFontSizePx * 3.5) {
+    return;
+  }
+
+  const targetLines = baseline.baseLineCount === 1 && ems > 12 ? 2 : baseline.baseLineCount;
+  const minFontSize = Math.max(18, Math.round(baseline.baseFontSizePx * 0.25));
+  let nextFontSize = Math.max(
+    minFontSize,
+    Math.min(
+      baseline.baseFontSizePx,
+      Math.floor((rect.width * targetLines * 0.94) / Math.max(ems, 1)),
+    ),
+  );
+  if (nextFontSize < baseline.baseFontSizePx) {
+    heading.style.fontSize = `${String(nextFontSize)}px`;
+    for (let step = 0; step < 3 && nextFontSize > minFontSize; step += 1) {
+      const updated = heading.getBoundingClientRect();
+      const lines = Math.max(1, Math.round(updated.height / (nextFontSize * 1.15)));
+      if (lines <= targetLines) break;
+      nextFontSize = Math.max(minFontSize, nextFontSize - 2);
+      heading.style.fontSize = `${String(nextFontSize)}px`;
+    }
+  }
+}
+
+function stabilizeHeadingLayout(block: Element): void {
+  if (block instanceof HTMLElement && headingBaselines.has(block)) {
+    fitHeadingElement(block);
+  }
+  const scopes = [block.parentElement, block.parentElement?.parentElement];
+  for (const scope of scopes) {
+    if (!scope) continue;
+    for (const child of scope.children) {
+      if (child !== block && child instanceof HTMLElement && headingBaselines.has(child)) {
+        fitHeadingElement(child);
+      }
+    }
+  }
 }

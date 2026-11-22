@@ -19,7 +19,7 @@
     sharedFolderPickerAvailable,
   } from '@/engine/model/shared-folder';
   import { hasLicenseConsent } from '@/shared/agreement';
-  import { openOrFocusExtensionTab } from '@/shared/extension-tabs';
+  import { openOptionsPage, openOrFocusExtensionTab } from '@/shared/extension-tabs';
   import { currentUiLanguage, t, type MessageKey } from '@/shared/i18n';
   import {
     isModelProgressMessage,
@@ -647,7 +647,8 @@
   async function downloadMissingModel() {
     const stored = settings ?? (await loadSettings().catch(() => null));
     if (!hasLicenseConsent(stored)) {
-      void openOrFocusExtensionTab('/onboarding.html');
+      const opened = await openOrFocusExtensionTab('/onboarding.html');
+      if (opened !== null) window.close();
       return;
     }
     await ensureFolderPermissionForAction();
@@ -655,8 +656,11 @@
     await refreshEngine();
   }
 
-  function openModelFolderSettings() {
-    void openOrFocusExtensionTab(sharedFolderSettingsHref((path) => browser.runtime.getURL(path)));
+  async function openModelFolderSettings() {
+    const opened = await openOrFocusExtensionTab(
+      sharedFolderSettingsHref((path) => browser.runtime.getURL(path)),
+    );
+    if (opened !== null) window.close();
   }
 
   async function dismissHighQuality() {
@@ -667,24 +671,28 @@
     }
   }
 
-  function openOptions() {
-    void browser.runtime.openOptionsPage().catch(() => {
-      readRuntimeLastError();
-    });
+  async function openOptions() {
+    const opened = await openOptionsPage();
+    if (opened) window.close();
+    else readRuntimeLastError();
   }
 
   async function changeShortcuts() {
     shortcutError = !(await openShortcutEditor());
   }
 
-  function openOnboarding() {
-    void openOrFocusExtensionTab('/onboarding.html');
+  async function openOnboarding() {
+    const opened = await openOrFocusExtensionTab('/onboarding.html');
+    if (opened !== null) window.close();
   }
 
-  function openTyped() {
-    void browser.tabs.create({ url: browser.runtime.getURL('/typed.html') }).catch(() => {
+  async function openTyped() {
+    try {
+      await browser.tabs.create({ url: browser.runtime.getURL('/typed.html') });
+      window.close();
+    } catch {
       readRuntimeLastError();
-    });
+    }
   }
 
   onMount(() => {
@@ -1042,7 +1050,8 @@
   .popup {
     display: grid;
     gap: var(--space-3);
-    width: 336px;
+    width: min(336px, 100vw);
+    box-sizing: border-box;
     padding: var(--space-4);
   }
 

@@ -132,6 +132,25 @@ export type IdleMinutes = 0 | 1 | 5 | 15;
 export const COMPOSE_PLACEMENTS = ['above', 'below', 'corner', 'free'] as const;
 export type ComposePlacement = (typeof COMPOSE_PLACEMENTS)[number];
 export type ComposeFreePoint = { x: number; y: number };
+export const FLOATING_BUTTON_MODES = ['auto', 'on', 'off'] as const;
+export type FloatingButtonMode = (typeof FLOATING_BUTTON_MODES)[number];
+export type FloatingButtonSide = 'left' | 'right';
+/** Docked edge and vertical offset (percent of viewport height) for the floating page menu. */
+export type FloatingButtonPosition = { side: FloatingButtonSide; y: number };
+
+export function isFloatingButtonMode(value: unknown): value is FloatingButtonMode {
+  return value === 'auto' || value === 'on' || value === 'off';
+}
+
+export function normalizeFloatingButtonPosition(value: unknown): FloatingButtonPosition | null {
+  if (!isRecord(value)) return null;
+  const side: FloatingButtonSide = value.side === 'left' ? 'left' : 'right';
+  if (typeof value.y !== 'number' || !Number.isFinite(value.y)) return null;
+  return {
+    side,
+    y: Math.round(Math.min(92, Math.max(8, value.y)) * 10) / 10,
+  };
+}
 
 /** Source-language rules the Gmail and Outlook banners share across messages. */
 export interface GmailTranslateLanguages {
@@ -355,6 +374,14 @@ export interface Settings {
   gmailAutoTranslateLangs: string[];
   /** Source languages the mail banner leaves alone. */
   gmailNeverTranslateLangs: string[];
+  /**
+   * In-page floating quick menu for browsers where the extension toolbar menu is unavailable
+   * or hard to reach (such as Firefox for Android). `auto` enables it on Android / touch
+   * mobile viewports and keeps desktop pages clean.
+   */
+  floatingButton: FloatingButtonMode;
+  /** Remembered edge and vertical position (%) of the floating button. */
+  floatingButtonPosition: FloatingButtonPosition | null;
 }
 
 export type SettingsPatch = Partial<
@@ -395,6 +422,8 @@ export type SettingsPatch = Partial<
     | 'gmailTranslateBanner'
     | 'gmailAutoTranslateLangs'
     | 'gmailNeverTranslateLangs'
+    | 'floatingButton'
+    | 'floatingButtonPosition'
   >
 > & {
   shortcutsEnabled?: Partial<ShortcutEnabled>;
@@ -438,6 +467,8 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   gmailTranslateBanner: true,
   gmailAutoTranslateLangs: [],
   gmailNeverTranslateLangs: [],
+  floatingButton: 'auto',
+  floatingButtonPosition: null,
 });
 
 export function createDefaultSettings(uiLanguage: string): Settings {
@@ -508,6 +539,8 @@ export function normalizeSettings(value: unknown, uiLanguage: string): Settings 
     gmailTranslateBanner: value.gmailTranslateBanner !== false,
     gmailAutoTranslateLangs: gmailLanguages.auto,
     gmailNeverTranslateLangs: gmailLanguages.never,
+    floatingButton: isFloatingButtonMode(value.floatingButton) ? value.floatingButton : 'auto',
+    floatingButtonPosition: normalizeFloatingButtonPosition(value.floatingButtonPosition),
   };
 }
 

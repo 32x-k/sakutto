@@ -102,6 +102,15 @@ export interface OpenSetupRequest {
   type: 'ui:open-setup';
 }
 
+export interface OpenOptionsRequest {
+  type: 'ui:open-options';
+  section?: string;
+}
+
+export interface OpenTypedRequest {
+  type: 'ui:open-typed';
+}
+
 export interface CaptionTimedtextRequest {
   type: 'captions:timedtext';
   url: string;
@@ -283,6 +292,18 @@ export function isShortcutQuery(value: unknown): value is ShortcutQuery {
 
 export function isOpenSetupRequest(value: unknown): value is OpenSetupRequest {
   return isRecord(value) && value.type === 'ui:open-setup';
+}
+
+export function isOpenOptionsRequest(value: unknown): value is OpenOptionsRequest {
+  return (
+    isRecord(value) &&
+    value.type === 'ui:open-options' &&
+    (value.section === undefined || typeof value.section === 'string')
+  );
+}
+
+export function isOpenTypedRequest(value: unknown): value is OpenTypedRequest {
+  return isRecord(value) && value.type === 'ui:open-typed';
 }
 
 export function isCaptionTimedtextRequest(value: unknown): value is CaptionTimedtextRequest {

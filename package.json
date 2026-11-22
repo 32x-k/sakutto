@@ -22,6 +22,7 @@
     "dev": "node scripts/sync-pdfjs.mjs && node scripts/sync-licenses.mjs && wxt",
     "build": "node scripts/verify-wllama.mjs && node scripts/sync-pdfjs.mjs && node scripts/sync-licenses.mjs && wxt build",
     "build:firefox": "node scripts/verify-wllama.mjs && node scripts/sync-pdfjs.mjs && node scripts/sync-licenses.mjs && wxt build -b firefox",
+    "build:firefox-android": "node scripts/build-firefox-android.mjs",
     "zip": "node scripts/verify-wllama.mjs && node scripts/sync-pdfjs.mjs && node scripts/sync-licenses.mjs && wxt zip && node scripts/verify-package.ts",
     "zip:firefox": "node scripts/verify-wllama.mjs && node scripts/sync-pdfjs.mjs && node scripts/sync-licenses.mjs && wxt zip -b firefox && node scripts/verify-package.ts --browser firefox",
     "source:firefox": "node scripts/amo-source-package.ts",

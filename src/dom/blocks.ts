@@ -115,6 +115,7 @@ const OWN_UI_TAGS: ReadonlySet<string> = new Set([
   'SAKUTTO-STATUS',
   'SAKUTTO-BAR',
   'SAKUTTO-CAPTIONS',
+  'SAKUTTO-FAB',
 ]);
 
 const SCRIPT_SELECTOR = 'sub, sup';

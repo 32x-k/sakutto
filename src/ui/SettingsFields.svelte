@@ -9,15 +9,18 @@
   } from '@/shared/languages';
   import {
     COMPOSE_PLACEMENTS,
+    FLOATING_BUTTON_MODES,
     TRANSLATION_POPUP_SIZE_MAX,
     TRANSLATION_POPUP_SIZE_MIN,
     VIDEO_CAPTION_SIZE_MAX,
     VIDEO_CAPTION_SIZE_MIN,
     isComposePlacement,
+    isFloatingButtonMode,
     normalizePlainTextLineBreaks,
     normalizeTranslationPopupSize,
     normalizeVideoCaptionSize,
     removeGmailTranslateLanguage,
+    type FloatingButtonMode,
     type GmailTranslateLanguages,
     type Settings,
     type SettingsPatch,
@@ -177,6 +180,21 @@
       browser.permissions.onRemoved?.removeListener(onRemoved);
     };
   });
+
+  const floatingButtonLabels: Record<
+    FloatingButtonMode,
+    'floatingButtonAuto' | 'floatingButtonOn' | 'floatingButtonOff'
+  > = {
+    auto: 'floatingButtonAuto',
+    on: 'floatingButtonOn',
+    off: 'floatingButtonOff',
+  };
+
+  function updateFloatingButton(event: Event) {
+    const select = event.currentTarget as HTMLSelectElement;
+    if (!isFloatingButtonMode(select.value)) return;
+    onChange({ floatingButton: select.value });
+  }
 
   function updatePace(event: Event) {
     const select = event.currentTarget as HTMLSelectElement;
@@ -365,6 +383,16 @@
     </p>
   {/if}
   <p class="muted help">{t('allSitesSettingHelp')}</p>
+
+  <label class="field" data-sakutto="floating-button">
+    <span>{t('floatingButtonLabel')}</span>
+    <select value={settings.floatingButton} onchange={updateFloatingButton}>
+      {#each FLOATING_BUTTON_MODES as mode (mode)}
+        <option value={mode}>{t(floatingButtonLabels[mode])}</option>
+      {/each}
+    </select>
+  </label>
+  <p class="muted help">{t('floatingButtonHelp')}</p>
 
   <label class="check">
     <input

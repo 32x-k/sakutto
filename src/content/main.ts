@@ -4,6 +4,7 @@ import { ComposeController, type ComposeLabels, type ComposePreferences } from '
 import { shouldHandleComposeCommand } from '@/dom/compose-field';
 import { detectDocumentLanguage } from '@/dom/detect';
 import { fakeTranslate } from '@/dom/fake-engine';
+import { FloatingMenuController, type FloatingMenuLabels } from '@/dom/floating-menu';
 import { GmailBannerController, isGmailHost, type GmailBannerLabels } from '@/dom/gmail-banner';
 import {
   OutlookBannerController,
@@ -347,6 +348,24 @@ function overlayLabels(): OverlayLabels {
   };
 }
 
+function floatingMenuLabels(): FloatingMenuLabels {
+  return {
+    brand: t('extensionShortName'),
+    translatePage: t('translateThisPage'),
+    restorePage: t('restoreThisPage'),
+    displayReplace: t('displayReplace'),
+    displayBilingual: t('displayBilingual'),
+    targetLabel: t('targetLanguageLabel'),
+    alwaysSite: t('alwaysTranslateSite'),
+    openTyped: t('openTyped'),
+    openOptions: t('openOptions'),
+    hideTab: t('floatingButtonHideTab'),
+    close: t('close'),
+    pageTranslated: t('pageTranslated'),
+    pageProgress: (done, total) => t('pageProgress', [String(done), String(total)]),
+  };
+}
+
 function openFolderEnableWindow(): void {
   void browser.runtime.sendMessage({ type: 'folder:open-enable' }).catch(() => {
     readRuntimeLastError();
@@ -382,6 +401,7 @@ export function contentMain(): void {
   let captions: VideoCaptionSession | null = null;
   let gmailBanner: GmailBannerController | null = null;
   let outlookBanner: OutlookBannerController | null = null;
+  let floatingMenu: FloatingMenuController | null = null;
   let invalidationToreDown = false;
   // The passive all-sites injection stays quiet on a host the reader turned off. The first
   // explicit popup or command message flips this for the life of the document.
@@ -393,8 +413,10 @@ export function contentMain(): void {
     invalidationToreDown = true;
     gmailBanner?.dispose();
     outlookBanner?.dispose();
+    floatingMenu?.dispose();
     gmailBanner = null;
     outlookBanner = null;
+    floatingMenu = null;
     unregisterLiveContentInstanceToken(instanceToken);
     removeOwnedMailBannerHosts(document, instanceToken);
     document.documentElement.removeAttribute(CONTENT_INSTANCE_DOC_ATTR);
@@ -664,6 +686,77 @@ export function contentMain(): void {
     gmailBanner.start();
     outlookBanner.start();
 
+    floatingMenu = new FloatingMenuController(document, {
+      labels: floatingMenuLabels(),
+      preferences: {
+        mode: liveSettings.floatingButton,
+        position: liveSettings.floatingButtonPosition,
+        uiLanguage: currentUiLanguage(),
+      },
+      callbacks: {
+        onTogglePage: () => {
+          markExplicitPageActivation();
+          pageCommandBridge.deliver?.('toggle');
+        },
+        onToggleBilingual: () => {
+          markExplicitPageActivation();
+          pageCommandBridge.deliver?.('bilingual');
+        },
+        onChangeTarget: (language) => {
+          liveSettings = { ...liveSettings, targetLanguage: language };
+          void saveSettings({ targetLanguage: language });
+          if (liveRule.targetLanguage !== undefined) {
+            const nextRule = { ...liveRule, host };
+            delete nextRule.targetLanguage;
+            liveRule = nextRule;
+            void saveSiteRule(nextRule);
+          }
+          session.setPreferences(preferencesFor(liveSettings, liveRule, host));
+          floatingMenu?.refresh();
+        },
+        onToggleAlways: (always) => {
+          const auto = always ? 'always' : 'ask';
+          liveRule = { ...liveRule, host, auto };
+          void saveSiteRule(liveRule);
+          session.setPreferences(preferencesFor(liveSettings, liveRule, host));
+          if (always) {
+            markExplicitPageActivation();
+            if (!session.state().active) pageCommandBridge.deliver?.('toggle');
+          }
+          floatingMenu?.refresh();
+        },
+        onOpenTyped: () => {
+          void browser.runtime.sendMessage({ type: 'ui:open-typed' }).catch(() => {
+            readRuntimeLastError();
+          });
+        },
+        onOpenOptions: () => {
+          void browser.runtime.sendMessage({ type: 'ui:open-options' }).catch(() => {
+            readRuntimeLastError();
+          });
+        },
+        onPositionChange: (position) => {
+          liveSettings = { ...liveSettings, floatingButtonPosition: position };
+          void saveSettings({ floatingButtonPosition: position });
+        },
+        readState: () => {
+          const view = session.state();
+          return {
+            active: view.active,
+            display: view.display,
+            pending: view.pending,
+            done: view.done,
+            total: view.total,
+            auto: liveRule.auto,
+            targetLanguage: effectivePageTarget(
+              liveSettings.targetLanguage,
+              liveRule.targetLanguage,
+            ),
+          };
+        },
+      },
+    });
+
     const detected = await detectDocumentLanguage(document);
     session.setDetectedLanguage(detected);
 
@@ -736,6 +829,12 @@ export function contentMain(): void {
       outlookBanner?.setPreferences(
         mailBannerPreferencesFor(liveSettings, liveRule, host, 'outlook'),
       );
+      floatingMenu?.setLabels(floatingMenuLabels());
+      floatingMenu?.setPreferences({
+        mode: liveSettings.floatingButton,
+        position: liveSettings.floatingButtonPosition,
+        uiLanguage: currentUiLanguage(),
+      });
     };
 
     subscribeSettings(() => {

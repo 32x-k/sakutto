@@ -48,7 +48,7 @@ async function openOrFocusExtensionTabNow(url: string): Promise<number | null> {
         // The tab closed between the query and the focus. Open a replacement below.
       }
       if (focused) {
-        if (existing.windowId !== undefined) {
+        if (existing.windowId !== undefined && browser.windows?.update) {
           await browser.windows.update(existing.windowId, { focused: true }).catch(() => undefined);
         }
         return existing.id;
@@ -64,5 +64,25 @@ async function openOrFocusExtensionTabNow(url: string): Promise<number | null> {
     return created.id ?? null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Open or focus the extension's Settings page (`options.html`).
+ *
+ * Uses `openOrFocusExtensionTab` first rather than `browser.runtime.openOptionsPage()`,
+ * because Firefox for Android (Fenix) fails to open or focus `options.html` when
+ * `openOptionsPage()` is called from an extension popup or tab. Falls back to
+ * `browser.runtime.openOptionsPage()` when the tabs API is unavailable.
+ */
+export async function openOptionsPage(suffix = ''): Promise<boolean> {
+  const opened = await openOrFocusExtensionTab(`/options.html${suffix}`);
+  if (opened !== null) return true;
+  if (typeof browser.runtime?.openOptionsPage !== 'function') return false;
+  try {
+    await browser.runtime.openOptionsPage();
+    return true;
+  } catch {
+    return false;
   }
 }

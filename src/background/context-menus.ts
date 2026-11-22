@@ -34,6 +34,10 @@ export function flushContextMenuInstall(): Promise<void> {
 
 async function installContextMenusOnce(): Promise<void> {
   if (menusReady) return;
+  if (!browser.contextMenus) {
+    menusReady = true;
+    return;
+  }
 
   await removeAllMenus();
   await createMenu({
@@ -69,7 +73,7 @@ function removeAllMenus(): Promise<void> {
     };
     try {
       const result = (
-        browser.contextMenus.removeAll as ((callback: () => void) => unknown) | undefined
+        browser.contextMenus?.removeAll as ((callback: () => void) => unknown) | undefined
       )?.(done);
       if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
         void (result as PromiseLike<unknown>).then(done, done);
@@ -91,12 +95,13 @@ function createMenu(properties: ContextMenuCreate): Promise<void> {
       resolve();
     };
     try {
-      const result = (
-        browser.contextMenus.create as (
-          createProperties: ContextMenuCreate,
-          callback: () => void,
-        ) => unknown
-      )(properties, done);
+      const create = browser.contextMenus?.create as
+        ((createProperties: ContextMenuCreate, callback: () => void) => unknown) | undefined;
+      if (!create) {
+        done();
+        return;
+      }
+      const result = create(properties, done);
       if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
         void (result as PromiseLike<unknown>).then(done, done);
         return;

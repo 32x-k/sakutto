@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { browser } from 'wxt/browser';
+  import { openOptionsPage, openOrFocusExtensionTab } from '@/shared/extension-tabs';
   import { DEFAULT_MODEL_ID } from '@/engine/model/catalog';
   import { sharedFolderNeedsUserAction, type EngineStatus } from '@/shared/engine-status';
   import FolderPermissionRestore from '@/ui/FolderPermissionRestore.svelte';
@@ -277,13 +278,11 @@
   }
 
   function openOnboarding() {
-    void browser.tabs
-      .create({ url: browser.runtime.getURL('/onboarding.html') })
-      .catch(() => undefined);
+    void openOrFocusExtensionTab('/onboarding.html');
   }
 
   function openOptions() {
-    void browser.runtime.openOptionsPage().catch(() => undefined);
+    void openOptionsPage();
   }
 
   onMount(() => {

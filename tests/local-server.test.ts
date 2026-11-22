@@ -18,6 +18,8 @@ import { PlamoSourceEngine } from '@/engine/local-server/source';
 import {
   DEFAULT_LOCAL_SERVER_PARALLEL,
   DEFAULT_LOCAL_SERVER_URL,
+  LOCAL_SERVER_PRESETS,
+  isFastFlowLmUrl,
   isLoopbackHostname,
   isRemoteServerUrl,
   normalizeParallel,
@@ -25,6 +27,7 @@ import {
   parseServerUrl,
   primaryOriginPattern,
   serverOriginKey,
+  sortLocalServerModels,
 } from '@/engine/local-server/url';
 import { buildTranslationPrompt, PFML3, TRANSLATION_STOP_TOKENS } from '@/engine/prompt/pfml3';
 import { ISSUE_73_HIDDEN } from '@/engine/text/sanitize';
@@ -135,6 +138,41 @@ describe('local server URL', () => {
     expect(DEFAULT_LOCAL_SERVER_PARALLEL).toBe(8);
     expect(normalizeParallel(undefined)).toBe(8);
     expect(normalizeParallel(4)).toBe(4);
+  });
+
+  it('defines the FastFlowLM NPU preset on loopback with default PLaMo-3 2B settings', () => {
+    const preset = LOCAL_SERVER_PRESETS['fastflowlm-npu'];
+    expect(preset.url).toBe('http://127.0.0.1:52625/v1');
+    expect(preset.model).toBe('plamo3-translate:2b');
+    expect(preset.parallel).toBe(1);
+    expect(isRemoteServerUrl(preset.url)).toBe(false);
+    expect(parseServerUrl(preset.url)?.completionsUrl).toBe(
+      'http://127.0.0.1:52625/v1/completions',
+    );
+  });
+
+  it('detects FastFlowLM URLs by its default port across loopback and remote hosts', () => {
+    expect(isFastFlowLmUrl('http://127.0.0.1:52625/v1')).toBe(true);
+    expect(isFastFlowLmUrl('http://100.64.0.1:52625/v1')).toBe(true);
+    expect(isFastFlowLmUrl('http://127.0.0.1:8080/v1')).toBe(false);
+    expect(isFastFlowLmUrl('not a url')).toBe(false);
+  });
+
+  it('sorts PLaMo models ahead of unrelated server models while keeping group order', () => {
+    const sorted = sortLocalServerModels([
+      { id: 'deepseek-r1:8b' },
+      { id: 'plamo3-translate:2b' },
+      { id: 'gemma3:4b' },
+      { id: 'plamo3-translate:0.8b' },
+      { id: 'plamo3-translate:8b' },
+    ]);
+    expect(sorted.map((model) => model.id)).toEqual([
+      'plamo3-translate:2b',
+      'plamo3-translate:0.8b',
+      'plamo3-translate:8b',
+      'deepseek-r1:8b',
+      'gemma3:4b',
+    ]);
   });
 
   it('treats loopback names as local and everything else as remote', () => {
@@ -663,6 +701,44 @@ describe('local server completions', () => {
       'local:test',
     );
     const chunks = await collectChunks(hitEngine.translate(segments, options()));
+    expect(chunks.some((chunk) => chunk.final === 'こんにちは')).toBe(true);
+    expect(await cache.get(key)).toEqual({ text: 'こんにちは', engine: 'plamo' });
+  });
+
+  it('retries with a larger max_tokens budget when a local server hits finish_reason length once', async () => {
+    const budgets: number[] = [];
+    const fake = await startFakeServer((_request, response, recorded) => {
+      const budget = Number(recorded.body?.max_tokens ?? 0);
+      budgets.push(budget);
+      response.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      if (budgets.length === 1) {
+        response.write('data: {"choices":[{"text":"こんに","finish_reason":"length"}]}\n\n');
+      } else {
+        response.write('data: {"choices":[{"text":"こんにちは","finish_reason":"stop"}]}\n\n');
+      }
+      response.write('data: [DONE]\n\n');
+      response.end();
+    });
+    servers.push(fake);
+
+    const store = new MemoryTranslationCacheStore();
+    const cache = new TranslationCache(store);
+    const segments = [{ id: 'a', text: 'Hello.' }];
+    const key = buildTranslationCacheKey({
+      model: 'local:retry',
+      tgt: 'ja',
+      form: 'polite',
+      text: 'Hello.',
+      src: 'en',
+    });
+    const engine = new CachingEngine(
+      new InBrowserEngine(new LocalServerRuntime(() => config(fake.url))),
+      cache,
+      'local:retry',
+    );
+    const chunks = await collectChunks(engine.translate(segments, options()));
+    expect(budgets).toHaveLength(2);
+    expect(budgets[1]).toBeGreaterThan(budgets[0] ?? 0);
     expect(chunks.some((chunk) => chunk.final === 'こんにちは')).toBe(true);
     expect(await cache.get(key)).toEqual({ text: 'こんにちは', engine: 'plamo' });
   });

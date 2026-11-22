@@ -67,6 +67,8 @@ function stored(overrides: Partial<Settings> = {}): Settings {
     gmailTranslateBanner: true,
     gmailAutoTranslateLangs: [],
     gmailNeverTranslateLangs: [],
+    floatingButton: 'auto',
+    floatingButtonPosition: null,
     ...overrides,
   };
 }

@@ -1391,6 +1391,9 @@
   "localServerPresetLmStudio": {
     "message": "LM Studio"
   },
+  "localServerPresetFastFlowLM": {
+    "message": "FastFlowLM NPU"
+  },
   "localServerPresetHelp": {
     "message": "พรีเซ็ตใส่เฉพาะ URL"
   },
@@ -1710,5 +1713,23 @@
   },
   "allSitesPopupEnable": {
     "message": "เปิดใช้งาน"
+  },
+  "floatingButtonLabel": {
+    "message": "ปุ่มลอยบนหน้าเว็บ"
+  },
+  "floatingButtonHelp": {
+    "message": "แสดงปุ่ม Sakutto ขนาดเล็กที่ลากย้ายได้บนหน้าเว็บ เพื่อแปลหน้าและเปิดการตั้งค่าโดยไม่ต้องเปิดเมนูส่วนขยาย เปิดสิทธิ์เข้าถึงทุกเว็บไซต์ด้านบนเพื่อให้แสดงอัตโนมัติในทุกหน้า"
+  },
+  "floatingButtonAuto": {
+    "message": "อัตโนมัติ (มือถือ / หน้าจอสัมผัสเท่านั้น)"
+  },
+  "floatingButtonOn": {
+    "message": "แสดงเสมอ"
+  },
+  "floatingButtonOff": {
+    "message": "ปิด"
+  },
+  "floatingButtonHideTab": {
+    "message": "ซ่อนบนหน้านี้"
   }
 }

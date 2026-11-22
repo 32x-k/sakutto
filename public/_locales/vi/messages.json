@@ -1391,6 +1391,9 @@
   "localServerPresetLmStudio": {
     "message": "LM Studio"
   },
+  "localServerPresetFastFlowLM": {
+    "message": "FastFlowLM NPU"
+  },
   "localServerPresetHelp": {
     "message": "Giá trị đặt sẵn chỉ điền URL."
   },
@@ -1710,5 +1713,23 @@
   },
   "allSitesPopupEnable": {
     "message": "Bật"
+  },
+  "floatingButtonLabel": {
+    "message": "Nút nổi trên trang"
+  },
+  "floatingButtonHelp": {
+    "message": "Hiển thị một nút Sakutto nhỏ có thể kéo trên trang web để dịch trang và mở Cài đặt mà không cần menu tiện ích. Bật quyền truy cập mọi trang web ở trên để tự động hiển thị trên mọi trang."
+  },
+  "floatingButtonAuto": {
+    "message": "Tự động (chỉ di động / cảm ứng)"
+  },
+  "floatingButtonOn": {
+    "message": "Luôn hiển thị"
+  },
+  "floatingButtonOff": {
+    "message": "Tắt"
+  },
+  "floatingButtonHideTab": {
+    "message": "Ẩn trên trang này"
   }
 }

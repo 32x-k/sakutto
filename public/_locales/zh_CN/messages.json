@@ -1391,6 +1391,9 @@
   "localServerPresetLmStudio": {
     "message": "LM Studio"
   },
+  "localServerPresetFastFlowLM": {
+    "message": "FastFlowLM NPU"
+  },
   "localServerPresetHelp": {
     "message": "预设只填写 URL。"
   },
@@ -1710,5 +1713,23 @@
   },
   "allSitesPopupEnable": {
     "message": "开启"
+  },
+  "floatingButtonLabel": {
+    "message": "页面悬浮按钮"
+  },
+  "floatingButtonHelp": {
+    "message": "在网页边缘显示可拖动的小型 Sakutto 按钮，无需打开浏览器扩展菜单即可翻译页面和打开设置。开启上方的“所有网站访问权限”即可在每个页面自动显示。"
+  },
+  "floatingButtonAuto": {
+    "message": "自动（仅限手机 / 触控设备）"
+  },
+  "floatingButtonOn": {
+    "message": "始终显示"
+  },
+  "floatingButtonOff": {
+    "message": "关闭"
+  },
+  "floatingButtonHideTab": {
+    "message": "在此页面隐藏"
   }
 }

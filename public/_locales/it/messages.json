@@ -1391,6 +1391,9 @@
   "localServerPresetLmStudio": {
     "message": "LM Studio"
   },
+  "localServerPresetFastFlowLM": {
+    "message": "FastFlowLM NPU"
+  },
   "localServerPresetHelp": {
     "message": "I preset compilano solo l'URL."
   },
@@ -1710,5 +1713,23 @@
   },
   "allSitesPopupEnable": {
     "message": "Attiva"
+  },
+  "floatingButtonLabel": {
+    "message": "Pulsante mobile sulla pagina"
+  },
+  "floatingButtonHelp": {
+    "message": "Mostra un piccolo pulsante Sakutto trascinabile sulle pagine web per tradurre e aprire le Impostazioni senza usare il menu delle estensioni. Attiva sopra l'accesso a tutti i siti per mostrarlo automaticamente."
+  },
+  "floatingButtonAuto": {
+    "message": "Automatico (solo mobile / touch)"
+  },
+  "floatingButtonOn": {
+    "message": "Mostra sempre"
+  },
+  "floatingButtonOff": {
+    "message": "Disattivato"
+  },
+  "floatingButtonHideTab": {
+    "message": "Nascondi su questa pagina"
   }
 }

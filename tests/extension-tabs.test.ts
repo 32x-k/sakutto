@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getURL: vi.fn((path: string) => `chrome-extension://test/${path.replace(/^\//u, '')}`),
+  openOptionsPage: vi.fn(),
   query: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
@@ -10,13 +11,13 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('wxt/browser', () => ({
   browser: {
-    runtime: { getURL: mocks.getURL },
+    runtime: { getURL: mocks.getURL, openOptionsPage: mocks.openOptionsPage },
     tabs: { query: mocks.query, create: mocks.create, update: mocks.update },
     windows: { update: mocks.updateWindow },
   },
 }));
 
-import { openOrFocusExtensionTab } from '@/shared/extension-tabs';
+import { openOptionsPage, openOrFocusExtensionTab } from '@/shared/extension-tabs';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -24,6 +25,7 @@ beforeEach(() => {
   mocks.create.mockResolvedValue({ id: 9 });
   mocks.update.mockResolvedValue({});
   mocks.updateWindow.mockResolvedValue({});
+  mocks.openOptionsPage.mockResolvedValue(undefined);
 });
 
 describe('openOrFocusExtensionTab', () => {
@@ -96,5 +98,34 @@ describe('openOrFocusExtensionTab', () => {
     await expect(first).resolves.toBe(9);
     await expect(second).resolves.toBe(9);
     expect(mocks.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('openOptionsPage', () => {
+  it('opens options.html via the tabs API so Firefox for Android popups work', async () => {
+    expect(await openOptionsPage()).toBe(true);
+    expect(mocks.create).toHaveBeenCalledWith({
+      url: 'chrome-extension://test/options.html',
+    });
+    expect(mocks.openOptionsPage).not.toHaveBeenCalled();
+  });
+
+  it('focuses an existing options tab and keeps an optional hash section', async () => {
+    mocks.query.mockResolvedValue([{ id: 7, windowId: 1 }]);
+
+    expect(await openOptionsPage('#engine-settings')).toBe(true);
+    expect(mocks.query).toHaveBeenCalledWith({ url: 'chrome-extension://test/options.html*' });
+    expect(mocks.update).toHaveBeenCalledWith(7, {
+      active: true,
+      url: 'chrome-extension://test/options.html#engine-settings',
+    });
+    expect(mocks.openOptionsPage).not.toHaveBeenCalled();
+  });
+
+  it('falls back to runtime.openOptionsPage when tabs.create fails', async () => {
+    mocks.create.mockRejectedValue(new Error('tabs unavailable'));
+
+    expect(await openOptionsPage()).toBe(true);
+    expect(mocks.openOptionsPage).toHaveBeenCalledTimes(1);
   });
 });

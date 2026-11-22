@@ -2,6 +2,13 @@ export const DEFAULT_LOCAL_SERVER_URL = 'http://127.0.0.1:8080/v1';
 export const DEFAULT_LOCAL_SERVER_TIMEOUT_MS = 120_000;
 export const DEFAULT_LOCAL_SERVER_PARALLEL = 8;
 
+export interface LocalServerPreset {
+  readonly id: string;
+  readonly url: string;
+  readonly model?: string;
+  readonly parallel?: number;
+}
+
 export const LOCAL_SERVER_PRESETS = {
   mlx: {
     id: 'mlx',
@@ -11,7 +18,43 @@ export const LOCAL_SERVER_PRESETS = {
     id: 'lm-studio',
     url: 'http://127.0.0.1:1234/v1',
   },
-} as const;
+  'fastflowlm-npu': {
+    id: 'fastflowlm-npu',
+    url: 'http://127.0.0.1:52625/v1',
+    model: 'plamo3-translate:2b',
+    parallel: 1,
+  },
+} as const satisfies Record<string, LocalServerPreset>;
+
+export const FASTFLOWLM_DEFAULT_PORT = '52625';
+
+export const FASTFLOWLM_PLAMO_MODELS = [
+  'plamo3-translate:0.8b',
+  'plamo3-translate:2b',
+  'plamo3-translate:8b',
+] as const;
+
+/** True when the URL targets FastFlowLM's default port (loopback, LAN, or Tailscale). */
+export function isFastFlowLmUrl(url: string): boolean {
+  try {
+    return new URL(url.trim()).port === FASTFLOWLM_DEFAULT_PORT;
+  } catch {
+    return false;
+  }
+}
+
+/** Places PLaMo models ahead of unrelated models while keeping each group's server order. */
+export function sortLocalServerModels<T extends { readonly id: string }>(
+  models: readonly T[],
+): T[] {
+  const plamo: T[] = [];
+  const other: T[] = [];
+  for (const model of models) {
+    if (/plamo/iu.test(model.id)) plamo.push(model);
+    else other.push(model);
+  }
+  return [...plamo, ...other];
+}
 
 export type LocalServerPresetId = keyof typeof LOCAL_SERVER_PRESETS;
 

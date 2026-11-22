@@ -52,7 +52,9 @@ import { grantOriginsFor } from '@/dom/sites';
 import type { ModelId } from '@/engine/model/catalog';
 import { normalizeSelectedModelId } from '@/engine/model/selection';
 import { hasLicenseConsent } from '@/shared/agreement';
+import { isAndroidPlatform } from '@/shared/browser';
 import type { EngineCapabilities } from '@/shared/capabilities';
+import { openOptionsPage, openOrFocusExtensionTab } from '@/shared/extension-tabs';
 import { isEngineCapabilities } from '@/shared/capabilities';
 import { pageReadPlayerResponse } from '@/captions/youtube';
 import { pageFetchTimedtext, resolveCaptionFetchUrl } from '@/captions/timedtext';
@@ -65,7 +67,9 @@ import {
   isEngineTierRequest,
   isEngineWarmRequest,
   isModelCancelRequest,
+  isOpenOptionsRequest,
   isOpenSetupRequest,
+  isOpenTypedRequest,
   isShortcutQuery,
   isSiteGrantRequest,
   isModelAttachRequest,
@@ -247,7 +251,7 @@ export default defineBackground(() => {
   }
 
   async function recordCommandAssignments(restoreEmpty = false): Promise<void> {
-    const commands = await browser.commands.getAll().catch(() => []);
+    const commands = (await browser.commands?.getAll?.().catch(() => [])) ?? [];
     const next = restoreEmpty ? await restoreEmptyCommandShortcuts(commands) : commands;
     await resolveShortcutQuery(next);
   }
@@ -261,6 +265,14 @@ export default defineBackground(() => {
       await syncAllSitesContentScripts();
       if (reason === 'install') {
         await browser.tabs.create({ url: browser.runtime.getURL('/onboarding.html') });
+      } else if (reason === 'update' && isAndroidPlatform()) {
+        const [allSites, settings] = await Promise.all([hasAllSitesAccess(), ensureSettings()]);
+        if (
+          !allSites ||
+          (settings.engineSource !== 'local-server' && !hasLicenseConsent(settings))
+        ) {
+          await openOptionsPage('#engine-settings');
+        }
       }
       await warmStoredModel();
     })().catch(() => undefined);
@@ -464,13 +476,17 @@ export default defineBackground(() => {
           }
           const url = new URL(browser.runtime.getURL('/grant.html'));
           url.searchParams.set('host', message.host);
-          await browser.windows.create({
-            url: url.toString(),
-            type: 'popup',
-            width: 420,
-            height: 280,
-            focused: true,
-          });
+          if (browser.windows?.create) {
+            await browser.windows.create({
+              url: url.toString(),
+              type: 'popup',
+              width: 420,
+              height: 280,
+              focused: true,
+            });
+          } else {
+            await browser.tabs.create({ url: url.toString() });
+          }
           sendResponse(false);
         })
         .catch(() => sendResponse(false));
@@ -478,16 +494,31 @@ export default defineBackground(() => {
     }
 
     if (isOpenSetupRequest(message)) {
-      void browser.tabs.create({ url: browser.runtime.getURL('/onboarding.html') }).then(
-        () => sendResponse(true),
+      void openOrFocusExtensionTab('/onboarding.html').then(
+        (id) => sendResponse(id !== null),
+        () => sendResponse(false),
+      );
+      return true;
+    }
+
+    if (isOpenOptionsRequest(message)) {
+      const suffix =
+        message.section && /^[#?][A-Za-z0-9_=&-]+$/u.test(message.section) ? message.section : '';
+      void openOptionsPage(suffix).then(sendResponse, () => sendResponse(false));
+      return true;
+    }
+
+    if (isOpenTypedRequest(message)) {
+      void openOrFocusExtensionTab('/typed.html').then(
+        (id) => sendResponse(id !== null),
         () => sendResponse(false),
       );
       return true;
     }
 
     if (isShortcutQuery(message)) {
-      void browser.commands
-        .getAll()
+      const getAll = browser.commands?.getAll;
+      void (getAll ? getAll() : Promise.resolve([]))
         .then(async (commands) => ({
           ...(await resolveShortcutQuery(commands)),
           allSitesAccess: await hasAllSitesAccess(),

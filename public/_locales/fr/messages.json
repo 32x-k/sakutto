@@ -1391,6 +1391,9 @@
   "localServerPresetLmStudio": {
     "message": "LM Studio"
   },
+  "localServerPresetFastFlowLM": {
+    "message": "FastFlowLM NPU"
+  },
   "localServerPresetHelp": {
     "message": "Les préréglages ne remplissent que l'URL."
   },
@@ -1710,5 +1713,23 @@
   },
   "allSitesPopupEnable": {
     "message": "Activer"
+  },
+  "floatingButtonLabel": {
+    "message": "Bouton flottant sur la page"
+  },
+  "floatingButtonHelp": {
+    "message": "Affiche un petit bouton Sakutto déplaçable sur les pages web pour traduire et ouvrir les paramètres sans passer par le menu des extensions. Activez l'accès à tous les sites ci-dessus pour l'afficher automatiquement."
+  },
+  "floatingButtonAuto": {
+    "message": "Automatique (mobile / tactile uniquement)"
+  },
+  "floatingButtonOn": {
+    "message": "Toujours afficher"
+  },
+  "floatingButtonOff": {
+    "message": "Désactivé"
+  },
+  "floatingButtonHideTab": {
+    "message": "Masquer sur cette page"
   }
 }

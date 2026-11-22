@@ -1391,6 +1391,9 @@
   "localServerPresetLmStudio": {
     "message": "LM Studio"
   },
+  "localServerPresetFastFlowLM": {
+    "message": "FastFlowLM NPU"
+  },
   "localServerPresetHelp": {
     "message": "프리셋은 URL만 채웁니다."
   },
@@ -1710,5 +1713,23 @@
   },
   "allSitesPopupEnable": {
     "message": "켜기"
+  },
+  "floatingButtonLabel": {
+    "message": "페이지 플로팅 버튼"
+  },
+  "floatingButtonHelp": {
+    "message": "브라우저 확장 메뉴를 열지 않고도 웹페이지에서 바로 번역하고 설정을 열 수 있는 작은 이동식 버튼을 표시합니다. 모든 페이지에 자동 표시하려면 위의 모든 사이트 권한을 켜세요."
+  },
+  "floatingButtonAuto": {
+    "message": "자동 (모바일 / 터치 기기만)"
+  },
+  "floatingButtonOn": {
+    "message": "항상 표시"
+  },
+  "floatingButtonOff": {
+    "message": "끄기"
+  },
+  "floatingButtonHideTab": {
+    "message": "이 페이지에서 숨기기"
   }
 }

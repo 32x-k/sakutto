@@ -707,7 +707,8 @@ describe('InBrowserEngine Unicode input (wllama and local-server share this path
     await expect(
       collectChunks(engine.translate([{ id: 'a', text: 'Hello.' }], options())),
     ).rejects.toMatchObject({ code: 'server-failed', detail: 'length' });
-    expect(runtime.requests).toHaveLength(1);
+    expect(runtime.requests).toHaveLength(2);
+    expect(runtime.requests[1]?.maxTokens).toBeGreaterThan(runtime.requests[0]?.maxTokens ?? 0);
   });
 
   it('packs short segments after stripping joiners so line alignment stays 1:1', async () => {

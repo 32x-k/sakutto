@@ -75,6 +75,20 @@ export interface PlatformNavigator {
 }
 
 /**
+ * True on Android devices (e.g. Firefox for Android / Fenix). Used for mobile defaults
+ * such as the in-page floating quick menu where the browser's extension menu is hard to
+ * reach or unavailable.
+ */
+export function isAndroidPlatform(
+  nav: PlatformNavigator | undefined = globalThis.navigator as PlatformNavigator | undefined,
+): boolean {
+  if (!nav) return false;
+  const ua = nav.userAgent ?? '';
+  const platform = nav.userAgentData?.platform ?? nav.platform ?? '';
+  return /android/i.test(ua) || /android/i.test(platform);
+}
+
+/**
  * True on a Linux desktop, including Chrome's X11 and Wayland sessions. Android reports
  * Linux as its kernel in `navigator.platform` but runs Chrome for Android, so it is not a
  * desktop and gets no Linux-only hint.
@@ -85,5 +99,5 @@ export function isLinuxPlatform(
   if (!nav) return false;
   const platform = nav.userAgentData?.platform || nav.platform || nav.userAgent || '';
   if (!/linux/i.test(platform)) return false;
-  return !/android/i.test(nav.userAgent ?? platform);
+  return !isAndroidPlatform(nav);
 }

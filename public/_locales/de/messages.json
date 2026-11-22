@@ -1391,6 +1391,9 @@
   "localServerPresetLmStudio": {
     "message": "LM Studio"
   },
+  "localServerPresetFastFlowLM": {
+    "message": "FastFlowLM NPU"
+  },
   "localServerPresetHelp": {
     "message": "Voreinstellungen füllen nur die URL."
   },
@@ -1710,5 +1713,23 @@
   },
   "allSitesPopupEnable": {
     "message": "Aktivieren"
+  },
+  "floatingButtonLabel": {
+    "message": "Schwebende Schaltfläche auf Seiten"
+  },
+  "floatingButtonHelp": {
+    "message": "Zeigt eine kleine verschiebbare Sakutto-Schaltfläche auf Webseiten an, um Seiten zu übersetzen und Einstellungen ohne Erweiterungsmenü zu öffnen. Aktiviere oben den Zugriff auf alle Websites für die automatische Anzeige."
+  },
+  "floatingButtonAuto": {
+    "message": "Automatisch (nur Mobil / Touch)"
+  },
+  "floatingButtonOn": {
+    "message": "Immer anzeigen"
+  },
+  "floatingButtonOff": {
+    "message": "Aus"
+  },
+  "floatingButtonHideTab": {
+    "message": "Auf dieser Seite ausblenden"
   }
 }

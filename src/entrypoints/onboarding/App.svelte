@@ -33,6 +33,12 @@
   import { agreementFromStorage } from '@/shared/agreement';
   import { hasBuiltInTranslatorUi, isBraveBrowser } from '@/shared/browser';
   import {
+    hasAllSitesAccess,
+    requestAllSitesAccess,
+    syncAllSitesContentScripts,
+  } from '@/dom/all-sites';
+  import { openOptionsPage } from '@/shared/extension-tabs';
+  import {
     currentUiLanguage,
     integrityMessageKey,
     t,
@@ -148,6 +154,8 @@
   let closing = $state(false);
   let closeFailed = $state(false);
   let tryFailed = $state(false);
+  let allSitesGranted = $state(false);
+  let allSitesDenied = $state(false);
   let continued = $state(false);
   let marks = $state<ByteMark[]>([]);
   let now = $state(Date.now());
@@ -582,6 +590,23 @@
     }
   }
 
+  function openOptions() {
+    void openOptionsPage('#engine-settings');
+  }
+
+  function enableAllSites() {
+    allSitesDenied = false;
+    void (async () => {
+      const granted = await requestAllSitesAccess();
+      allSitesGranted = granted;
+      if (!granted) {
+        allSitesDenied = true;
+        return;
+      }
+      await syncAllSitesContentScripts();
+    })();
+  }
+
   async function close() {
     closing = true;
     closeFailed = false;
@@ -625,6 +650,10 @@
       now = Date.now();
       void syncDownloadStatus();
     }, 1000);
+
+    void hasAllSitesAccess().then((granted) => {
+      allSitesGranted = granted;
+    });
 
     void loadSettings()
       .then((settings) => {
@@ -694,8 +723,28 @@
           <li>{t('onboardingUseNow')}</li>
         {/if}
         <li>{t('onboardingPrivacyNote')}</li>
-        <li>{t('onboardingLocalServerNote')}</li>
+        <li>
+          {t('onboardingLocalServerNote')}
+          <button class="link-button inline-link" type="button" onclick={openOptions}>
+            {t('openOptions')}
+          </button>
+        </li>
       </ul>
+      {#if !allSitesGranted}
+        <div class="quick-access">
+          <button
+            class="button secondary"
+            type="button"
+            data-sakutto="onboarding-all-sites"
+            onclick={enableAllSites}
+          >
+            {t('allSitesSetting')}
+          </button>
+          {#if allSitesDenied}
+            <p class="error" role="alert">{t('allSitesPermissionDenied')}</p>
+          {/if}
+        </div>
+      {/if}
     </section>
   {/if}
 
@@ -977,6 +1026,18 @@
   .hero img {
     border-radius: 16px;
     margin-bottom: var(--space-2);
+  }
+
+  .notes .inline-link {
+    margin-left: 6px;
+    font-size: inherit;
+  }
+
+  .quick-access {
+    display: grid;
+    gap: var(--space-2);
+    justify-items: start;
+    margin-top: var(--space-3);
   }
 
   .eyebrow {

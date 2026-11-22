@@ -1391,6 +1391,9 @@
   "localServerPresetLmStudio": {
     "message": "LM Studio"
   },
+  "localServerPresetFastFlowLM": {
+    "message": "FastFlowLM NPU"
+  },
   "localServerPresetHelp": {
     "message": "Preset hanya mengisi URL."
   },
@@ -1710,5 +1713,23 @@
   },
   "allSitesPopupEnable": {
     "message": "Aktifkan"
+  },
+  "floatingButtonLabel": {
+    "message": "Tombol mengambang di halaman"
+  },
+  "floatingButtonHelp": {
+    "message": "Menampilkan tombol kecil Sakutto yang dapat digeser di halaman web untuk menerjemahkan dan membuka Setelan tanpa menu ekstensi. Aktifkan akses semua situs di atas agar muncul otomatis di setiap halaman."
+  },
+  "floatingButtonAuto": {
+    "message": "Otomatis (ponsel / sentuh saja)"
+  },
+  "floatingButtonOn": {
+    "message": "Selalu tampilkan"
+  },
+  "floatingButtonOff": {
+    "message": "Nonaktif"
+  },
+  "floatingButtonHideTab": {
+    "message": "Sembunyikan di halaman ini"
   }
 }

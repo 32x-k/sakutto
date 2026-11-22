@@ -36,7 +36,7 @@ function enqueueWrite<T>(work: () => Promise<T>): Promise<T> {
 type CommandsUpdate = (details: { name: string; shortcut: string }) => Promise<void>;
 
 function commandsUpdate(): CommandsUpdate | undefined {
-  const update = (browser.commands as { update?: unknown }).update;
+  const update = (browser.commands as { update?: unknown } | undefined)?.update;
   return typeof update === 'function' ? (update as CommandsUpdate) : undefined;
 }
 
@@ -69,7 +69,7 @@ export function restoreEmptyCommandShortcuts(
     }
     if (!restored) return commands;
     try {
-      return await browser.commands.getAll();
+      return (await browser.commands?.getAll?.()) ?? commands;
     } catch {
       return commands;
     }

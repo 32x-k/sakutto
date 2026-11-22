@@ -6,9 +6,12 @@
     syncEngineSourceRadios,
   } from '@/engine/local-server/permissions';
   import {
+    FASTFLOWLM_PLAMO_MODELS,
+    isFastFlowLmUrl,
     isRemoteServerUrl,
     LOCAL_SERVER_PRESETS,
     serverOriginKey,
+    sortLocalServerModels,
   } from '@/engine/local-server/url';
   import { EngineError } from '@/engine/errors';
   import { t } from '@/shared/i18n';
@@ -35,6 +38,7 @@
   let localRadio = $state<HTMLInputElement | undefined>(undefined);
   let remote = $derived(isRemoteServerUrl(settings.localServerUrl));
   let local = $derived(settings.engineSource === 'local-server');
+  let isFastFlowLm = $derived(isFastFlowLmUrl(settings.localServerUrl));
 
   async function grantIfNeeded(url: string): Promise<boolean> {
     const granted = await requestServerPermission(url);
@@ -103,13 +107,19 @@
   }
 
   async function applyPreset(id: keyof typeof LOCAL_SERVER_PRESETS) {
-    const url = LOCAL_SERVER_PRESETS[id].url;
+    const preset = LOCAL_SERVER_PRESETS[id];
+    const url = preset.url;
     testOk = false;
     testError = null;
     const originChanged = serverOriginKey(url) !== serverOriginKey(settings.localServerUrl);
+    const remoteNext = isRemoteServerUrl(url);
     const patch: SettingsPatch = { localServerUrl: url };
+    if ('model' in preset && preset.model) patch.localServerModel = preset.model;
+    if ('parallel' in preset && typeof preset.parallel === 'number') {
+      patch.localServerParallel = preset.parallel;
+    }
     if (originChanged) patch.localServerAllowRemote = false;
-    if (settings.engineSource === 'local-server') {
+    if (!remoteNext && settings.engineSource === 'local-server') {
       if (!(await grantIfNeeded(url))) return;
     }
     permissionDenied = false;
@@ -119,6 +129,12 @@
   async function changeModel(event: Event) {
     const target = event.currentTarget as HTMLInputElement;
     await onUpdate({ localServerModel: target.value });
+  }
+
+  async function selectQuickModel(modelId: string) {
+    testOk = false;
+    testError = null;
+    await onUpdate({ localServerModel: modelId });
   }
 
   async function changeApiKey(event: Event) {
@@ -184,11 +200,12 @@
       allowRemote: settings.localServerAllowRemote,
       parallel: settings.localServerParallel,
     });
-    models = result.models;
+    const sortedModels = sortLocalServerModels(result.models);
+    models = sortedModels;
     testOk = result.ok;
     testError = result.error ?? null;
-    if (result.ok && settings.localServerModel.length === 0 && result.models[0]) {
-      await onUpdate({ localServerModel: result.models[0].id });
+    if (result.ok && settings.localServerModel.length === 0 && sortedModels[0]) {
+      await onUpdate({ localServerModel: sortedModels[0].id });
     }
     testing = false;
   }
@@ -266,6 +283,13 @@
         >
           {t('localServerPresetLmStudio')}
         </button>
+        <button
+          class="button secondary"
+          type="button"
+          onclick={() => void applyPreset('fastflowlm-npu')}
+        >
+          {t('localServerPresetFastFlowLM')}
+        </button>
       </div>
       <p class="help">{t('localServerPresetHelp')}</p>
 
@@ -311,6 +335,21 @@
         </datalist>
       </label>
       <p class="help" id="local-server-model-help">{t('localServerModelHelp')}</p>
+      {#if isFastFlowLm}
+        <div class="presets">
+          {#each FASTFLOWLM_PLAMO_MODELS as modelId (modelId)}
+            <button
+              class="button"
+              class:secondary={settings.localServerModel !== modelId}
+              type="button"
+              aria-pressed={settings.localServerModel === modelId}
+              onclick={() => void selectQuickModel(modelId)}
+            >
+              {modelId}
+            </button>
+          {/each}
+        </div>
+      {/if}
 
       <details class="advanced">
         <summary>{t('localServerAdvanced')}</summary>

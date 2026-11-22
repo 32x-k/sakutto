@@ -714,7 +714,6 @@ export class InBrowserEngine implements IdentifiedEngine {
       let { lengthError, hitMaxTokens } = await generate(maxTokens, false);
 
       if (!this.isUnusable(source, output, hitMaxTokens)) {
-        if (lengthError) throw lengthError;
         if (!hitMaxTokens) return { text: output };
 
         const larger = Math.min(available, Math.max(maxTokens * 4, 128));
@@ -728,6 +727,7 @@ export class InBrowserEngine implements IdentifiedEngine {
             return failVisibleTruncation();
           }
         } else {
+          if (lengthError) throw lengthError;
           return failVisibleTruncation();
         }
       }

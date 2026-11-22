@@ -1391,6 +1391,9 @@
   "localServerPresetLmStudio": {
     "message": "LM Studio"
   },
+  "localServerPresetFastFlowLM": {
+    "message": "FastFlowLM NPU"
+  },
   "localServerPresetHelp": {
     "message": "Пресеты заполняют только URL."
   },
@@ -1710,5 +1713,23 @@
   },
   "allSitesPopupEnable": {
     "message": "Включить"
+  },
+  "floatingButtonLabel": {
+    "message": "Плавающая кнопка на странице"
+  },
+  "floatingButtonHelp": {
+    "message": "Показывает небольшую перемещаемую кнопку Sakutto на веб-страницах для перевода и открытия настроек без меню расширений. Включите доступ ко всем сайтам выше для автоматического показа."
+  },
+  "floatingButtonAuto": {
+    "message": "Авто (только мобильные / сенсорные)"
+  },
+  "floatingButtonOn": {
+    "message": "Всегда показывать"
+  },
+  "floatingButtonOff": {
+    "message": "Выкл."
+  },
+  "floatingButtonHideTab": {
+    "message": "Скрыть на этой странице"
   }
 }

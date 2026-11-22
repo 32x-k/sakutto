@@ -34,7 +34,7 @@ export function installPageActionListeners(engine?: EngineClient): void {
   if (listenersInstalled) return;
   listenersInstalled = true;
 
-  browser.commands.onCommand.addListener((command, tab) => {
+  browser.commands?.onCommand?.addListener((command, tab) => {
     // The PDF command is not a page action: the browser delivers the key here and the
     // background opens the reader itself, because no content script can run in its viewer.
     if (command === PDF_COMMAND) {
@@ -44,7 +44,7 @@ export function installPageActionListeners(engine?: EngineClient): void {
     void handleShortcutCommand(command, tab);
   });
 
-  browser.contextMenus.onClicked.addListener((info, tab) => {
+  browser.contextMenus?.onClicked?.addListener((info, tab) => {
     if (info.menuItemId === PDF_COMMAND) {
       void runPdfCommand(tab);
       return;

@@ -1391,6 +1391,9 @@
   "localServerPresetLmStudio": {
     "message": "LM Studio"
   },
+  "localServerPresetFastFlowLM": {
+    "message": "FastFlowLM NPU"
+  },
   "localServerPresetHelp": {
     "message": "預設只填入 URL。"
   },
@@ -1710,5 +1713,23 @@
   },
   "allSitesPopupEnable": {
     "message": "開啟"
+  },
+  "floatingButtonLabel": {
+    "message": "頁面懸浮按鈕"
+  },
+  "floatingButtonHelp": {
+    "message": "在網頁邊緣顯示可拖曳的小型 Sakutto 按鈕，無需開啟瀏覽器擴充功能選單即可翻譯頁面與開啟設定。開啟上方的所有網站存取權限即可在每個頁面自動顯示。"
+  },
+  "floatingButtonAuto": {
+    "message": "自動（僅限手機 / 觸控裝置）"
+  },
+  "floatingButtonOn": {
+    "message": "一律顯示"
+  },
+  "floatingButtonOff": {
+    "message": "關閉"
+  },
+  "floatingButtonHideTab": {
+    "message": "在此頁面隱藏"
   }
 }

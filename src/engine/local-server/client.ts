@@ -475,14 +475,18 @@ export async function testLocalServer(
   let probeRaw = '';
   let firstTokenMs: number | undefined;
   const activeSignal = signal ?? new AbortController().signal;
+  const probeConfig: LocalServerConfig = {
+    ...config,
+    timeoutMs: Math.max(config.timeoutMs, DEFAULT_LOCAL_SERVER_TIMEOUT_MS),
+  };
 
   try {
     onProgress?.({ stage: 'models', elapsedMs: 0 });
-    models = await listServerModels(config, activeSignal, fetchImpl);
+    models = await listServerModels(probeConfig, activeSignal, fetchImpl);
     if (
-      config.model.length > 0 &&
+      probeConfig.model.length > 0 &&
       models.length > 0 &&
-      !models.some((model) => model.id === config.model)
+      !models.some((model) => model.id === probeConfig.model)
     ) {
       return {
         ok: false,
@@ -494,7 +498,7 @@ export async function testLocalServer(
         ),
       };
     }
-    const activeModel = config.model || models[0]?.id || '';
+    const activeModel = probeConfig.model || models[0]?.id || '';
     onProgress?.({
       stage: 'loading-model',
       modelsCount: models.length,
@@ -502,7 +506,7 @@ export async function testLocalServer(
       elapsedMs: elapsed(),
     });
     await completeOnServer(
-      config,
+      probeConfig,
       connectionProbeRequest(activeSignal, (token) => {
         if (firstTokenMs === undefined && token.length > 0) {
           firstTokenMs = elapsed();

@@ -125,12 +125,11 @@ jobs:
             gh release edit "$TAG" \
               --title "$TITLE" \
               --notes-file /tmp/android-release-notes.md \
-              --prerelease
+              --prerelease=false
           else
             gh release create "$TAG" "$XPI_PATH" \
               --title "$TITLE" \
-              --notes-file /tmp/android-release-notes.md \
-              --prerelease
+              --notes-file /tmp/android-release-notes.md
           fi
 
       - name: Attach XPI to GitHub Release on tag push

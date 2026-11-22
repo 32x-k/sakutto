@@ -90,6 +90,7 @@ export interface FloatingMenuState {
   serverFault?: boolean;
   cached?: number;
   localServerModel?: string;
+  availableModels?: readonly string[] | null;
   probeStatus?: FloatingMenuProbeStatus | null;
 }
 
@@ -103,6 +104,7 @@ export interface FloatingMenuCallbacks {
   onTogglePage: () => void;
   onRetranslate?: () => void;
   onSelectModel?: (modelId: string) => void;
+  onOpenSheet?: () => void;
   onToggleBilingual: () => void;
   onChangeTarget: (language: TargetLanguage) => void;
   onToggleAlways: (always: boolean) => void;
@@ -913,6 +915,7 @@ export class FloatingMenuController {
     if (this.sheetEl) this.sheetEl.hidden = !next;
     this.fabButton?.setAttribute('aria-expanded', next ? 'true' : 'false');
     if (next) {
+      this.callbacks.onOpenSheet?.();
       this.applyTheme();
       const state = this.callbacks.readState();
       this.render(state);
@@ -1067,10 +1070,22 @@ export class FloatingMenuController {
     if (this.modelCurrentEl) {
       this.modelCurrentEl.textContent = state.localServerModel || 'plamo3-translate:2b';
     }
+    const availableSet =
+      Array.isArray(state.availableModels) && state.availableModels.length > 0
+        ? new Set(state.availableModels)
+        : null;
+    const isJa = this.prefs.uiLanguage.toLowerCase().startsWith('ja');
     for (const [modelId, pill] of this.modelPillBtns.entries()) {
+      const unavailable = availableSet !== null && !availableSet.has(modelId);
+      pill.disabled = unavailable;
+      pill.style.opacity = unavailable ? '0.38' : '';
+      pill.style.cursor = unavailable ? 'not-allowed' : '';
+      pill.title = unavailable ? (isJa ? 'サーバー側で無効' : 'Disabled on server') : '';
       pill.setAttribute(
         'aria-pressed',
-        (state.localServerModel || 'plamo3-translate:2b') === modelId ? 'true' : 'false',
+        !unavailable && (state.localServerModel || 'plamo3-translate:2b') === modelId
+          ? 'true'
+          : 'false',
       );
     }
 

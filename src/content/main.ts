@@ -787,6 +787,21 @@ export function contentMain(): void {
       }
     };
 
+    let availableServerModels: readonly string[] | null = null;
+    const refreshAvailableServerModels = (): void => {
+      void browser.runtime
+        .sendMessage({ type: 'sakutto:local-server-models' })
+        .then((res: unknown) => {
+          if (isRecord(res) && res.ok === true && Array.isArray(res.models)) {
+            availableServerModels = res.models.filter((m): m is string => typeof m === 'string');
+            floatingMenu?.refresh();
+          }
+        })
+        .catch(() => {
+          readRuntimeLastError();
+        });
+    };
+
     floatingMenu = new FloatingMenuController(document, {
       labels: floatingMenuLabels(),
       preferences: {
@@ -795,6 +810,9 @@ export function contentMain(): void {
         uiLanguage: currentUiLanguage(),
       },
       callbacks: {
+        onOpenSheet: () => {
+          refreshAvailableServerModels();
+        },
         onTogglePage: () => {
           markExplicitPageActivation();
           pageCommandBridge.deliver?.('toggle');
@@ -873,6 +891,7 @@ export function contentMain(): void {
             serverFault: view.serverFault === true,
             cached: view.cached ?? 0,
             localServerModel: liveSettings.localServerModel,
+            availableModels: availableServerModels,
             probeStatus: liveProbeStatus,
             targetLanguage: effectivePageTarget(
               liveSettings.targetLanguage,

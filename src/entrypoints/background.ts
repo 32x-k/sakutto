@@ -94,7 +94,11 @@ import {
   type WebGpuDebugProfile,
 } from '@/shared/gpu-diagnostic';
 import { ensureSettings, subscribeSettings } from '@/shared/storage';
-import { localServerConfigFromSettings, testLocalServer } from '@/engine/local-server/client';
+import {
+  listServerModels,
+  localServerConfigFromSettings,
+  testLocalServer,
+} from '@/engine/local-server/client';
 import {
   CONTENT_LIVENESS_GENERATION_MESSAGE,
   CONTENT_LIVENESS_PORT,
@@ -458,6 +462,24 @@ export default defineBackground(() => {
 
     if (isEngineCapabilitiesRequest(message)) {
       void getEngineCapabilities().then(sendResponse, () => sendResponse(null));
+      return true;
+    }
+
+    if (
+      typeof message === 'object' &&
+      message !== null &&
+      (message as { type?: unknown }).type === 'sakutto:local-server-models'
+    ) {
+      void (async () => {
+        try {
+          const settings = await ensureSettings();
+          const config = { ...localServerConfigFromSettings(settings), timeoutMs: 3_000 };
+          const models = await listServerModels(config, new AbortController().signal, fetch);
+          sendResponse({ ok: true, models: models.map((m) => m.id) });
+        } catch {
+          sendResponse({ ok: false, models: null });
+        }
+      })();
       return true;
     }
 

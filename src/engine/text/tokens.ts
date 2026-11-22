@@ -71,7 +71,11 @@ export function budgetTokens(text: string): number {
  * Completion `max_tokens` from a conservative count of the source. Byte-fallback
  * sequences (subdivision flags, family emoji) need far more room than
  * {@link estimateTokens}; the prompt/available side keeps the lighter count.
+ *
+ * Uses `3 * count + 24` (floor 48) so polite Japanese / non-Latin expansions
+ * finish on the first pass instead of hitting `finish_reason: length` and
+ * re-running the entire prompt.
  */
 export function completionTokenBudget(text: string, counted?: number): number {
-  return Math.max(32, (counted ?? budgetTokens(text)) * 2 + 16);
+  return Math.max(48, Math.ceil((counted ?? budgetTokens(text)) * 3) + 24);
 }

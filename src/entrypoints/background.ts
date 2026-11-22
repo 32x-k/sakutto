@@ -138,51 +138,69 @@ export default defineBackground(() => {
   browser.runtime.onConnect.addListener((port) => {
     if (port.name.startsWith(LOCAL_SERVER_PROBE_PORT_PREFIX)) {
       const activeController = new AbortController();
+      // Keep the MV3 background event page / service worker alive past Firefox's 30s idle
+      // suspension while large models (e.g. 8B) are loading on the local server.
+      const keepaliveTimer = setInterval(() => {
+        if (activeController.signal.aborted) return;
+        try {
+          port.postMessage({ type: 'keepalive' });
+        } catch {
+          readRuntimeLastError();
+        }
+      }, 10_000);
+      const stopKeepalive = (): void => {
+        clearInterval(keepaliveTimer);
+      };
       bindPortDisconnectCleanup(port, () => {
+        stopKeepalive();
         activeController.abort();
       });
       const rawModel = port.name.slice(LOCAL_SERVER_PROBE_PORT_PREFIX.length).trim();
       const requestedModel = rawModel.length > 0 ? rawModel : undefined;
       void (async () => {
-        const settings = await ensureSettings();
-        const baseConfig = localServerConfigFromSettings(settings);
-        const config = {
-          ...baseConfig,
-          ...(requestedModel !== undefined ? { model: requestedModel } : {}),
-        };
-        const result = await testLocalServer(
-          config,
-          fetch,
-          (progress) => {
-            if (activeController.signal.aborted) return;
-            try {
-              port.postMessage({ type: 'progress', progress });
-            } catch {
-              readRuntimeLastError();
-            }
-          },
-          activeController.signal,
-        );
-        if (activeController.signal.aborted) return;
         try {
-          port.postMessage({
-            type: 'result',
-            ok: result.ok,
-            model: config.model || result.models[0]?.id || '',
-            modelsCount: result.models.length,
-            probeText: result.probeText,
-            elapsedMs: result.elapsedMs,
-            firstTokenMs: result.firstTokenMs,
-            error: result.error
-              ? {
-                  code: result.error.code,
-                  message: result.error.message,
-                  detail: result.error.detail,
-                }
-              : undefined,
-          });
-        } catch {
-          readRuntimeLastError();
+          const settings = await ensureSettings();
+          const baseConfig = localServerConfigFromSettings(settings);
+          const config = {
+            ...baseConfig,
+            ...(requestedModel !== undefined ? { model: requestedModel } : {}),
+          };
+          const result = await testLocalServer(
+            config,
+            fetch,
+            (progress) => {
+              if (activeController.signal.aborted) return;
+              try {
+                port.postMessage({ type: 'progress', progress });
+              } catch {
+                readRuntimeLastError();
+              }
+            },
+            activeController.signal,
+          );
+          if (activeController.signal.aborted) return;
+          try {
+            port.postMessage({
+              type: 'result',
+              ok: result.ok,
+              model: config.model || result.models[0]?.id || '',
+              modelsCount: result.models.length,
+              probeText: result.probeText,
+              elapsedMs: result.elapsedMs,
+              firstTokenMs: result.firstTokenMs,
+              error: result.error
+                ? {
+                    code: result.error.code,
+                    message: result.error.message,
+                    detail: result.error.detail,
+                  }
+                : undefined,
+            });
+          } catch {
+            readRuntimeLastError();
+          }
+        } finally {
+          stopKeepalive();
         }
       })();
       return;

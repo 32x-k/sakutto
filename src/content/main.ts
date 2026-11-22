@@ -35,6 +35,7 @@ import {
 } from '@/shared/folder-grant-messages';
 import { FOLDER_PERMISSION_ERROR } from '@/engine/model/folder-permission';
 import { hasLicenseConsent } from '@/shared/agreement';
+import { isAndroidPlatform } from '@/shared/browser';
 import { sharedFolderNeedsUserAction, type ModelStatus } from '@/shared/engine-status';
 import { mergeGlossary } from '@/shared/glossary';
 import { readRuntimeLastError } from '@/shared/runtime-last-error';
@@ -387,6 +388,7 @@ export function contentMain(): void {
   claimContentExtensionInstance(document, instanceToken);
 
   const host = pageHost(location.href) ?? '';
+  const android = isAndroidPlatform();
   // Browser bindings label compose UI. Translation commands arrive from the background,
   // except for a never-assigned command on a page the broad all-sites grant keeps covered.
   let shortcutSnapshot: ShortcutSnapshot | null = null;
@@ -408,12 +410,17 @@ export function contentMain(): void {
   let explicitActivationSeen = false;
   let selectionOffersSuppressed = false;
   let pendingExistingSelectionOffer = false;
+  let languageDetected = false;
   const teardownAfterInvalidation = (): void => {
     if (invalidationToreDown) return;
     invalidationToreDown = true;
+    compose?.destroy();
+    captions?.stop();
     gmailBanner?.dispose();
     outlookBanner?.dispose();
     floatingMenu?.dispose();
+    compose = null;
+    captions = null;
     gmailBanner = null;
     outlookBanner = null;
     floatingMenu = null;
@@ -445,13 +452,15 @@ export function contentMain(): void {
     window.clearTimeout(shortcutRefreshTimer);
     shortcutRefreshTimer = window.setTimeout(refreshShortcuts, 80);
   };
-  refreshShortcuts();
-  // Keep the compose label current after a visit to the browser's shortcut editor.
-  window.addEventListener('focus', scheduleShortcutRefresh);
-  document.addEventListener('visibilitychange', scheduleShortcutRefresh);
-  window.addEventListener('pageshow', (event) => {
-    if (event.persisted) scheduleShortcutRefresh();
-  });
+  if (!android) {
+    refreshShortcuts();
+    // Keep the compose label current after a visit to the browser's shortcut editor.
+    window.addEventListener('focus', scheduleShortcutRefresh);
+    document.addEventListener('visibilitychange', scheduleShortcutRefresh);
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) scheduleShortcutRefresh();
+    });
+  }
 
   let engineSource: Settings['engineSource'] = 'in-browser';
   const engine = {
@@ -488,8 +497,12 @@ export function contentMain(): void {
 
   const pageCommandBridge: {
     deliver: ((command: PageCommandName, source?: EventTarget | null) => void) | null;
+    ensureCompose: ((nextSettings: Settings, nextRule: SiteRule) => ComposeController) | null;
+    syncCaptions: ((nextSettings: Settings, nextRule: SiteRule) => void) | null;
   } = {
     deliver: null,
+    ensureCompose: null,
+    syncCaptions: null,
   };
 
   const sessionPromise = (async () => {
@@ -508,7 +521,17 @@ export function contentMain(): void {
       modelStatusKnown = true;
       return true;
     };
-    if (!__SAKUTTO_FAKE_ENGINE__) await readModelStatus();
+    if (!__SAKUTTO_FAKE_ENGINE__) {
+      // Local server mode does not depend on in-browser model files or folder grants, so
+      // avoid waking the background/offscreen host on every normal page load.
+      if (settings.engineSource === 'local-server') {
+        plamoReady = true;
+        folderNeedsUserAction = false;
+        modelStatusKnown = true;
+      } else {
+        await readModelStatus();
+      }
+    }
     shortcutsEnabled = settings.shortcutsEnabled;
     const session = new PageSession(document, {
       engine,
@@ -528,12 +551,15 @@ export function contentMain(): void {
       },
       pageKey: (event) =>
         allSitesAccess &&
+        !android &&
         listensFor(shortcutSnapshot, shortcutAssigned, shortcutsEnabled, 'translate-page')(event),
       bilingualKey: (event) =>
         allSitesAccess &&
+        !android &&
         listensFor(shortcutSnapshot, shortcutAssigned, shortcutsEnabled, 'toggle-bilingual')(event),
       selectionKey: (event) =>
         allSitesAccess &&
+        !android &&
         listensFor(
           shortcutSnapshot,
           shortcutAssigned,
@@ -542,70 +568,121 @@ export function contentMain(): void {
         )(event),
       onPageCommand: (command) => pageCommandBridge.deliver?.(command),
     });
+
+    const createCompose = (
+      targetSettings: Settings,
+      targetRule: SiteRule,
+      readiness: TypedReadiness,
+    ): ComposeController =>
+      new ComposeController(document, {
+        engine,
+        labels: composeLabels(readiness),
+        preferences: composePreferencesFor(
+          targetSettings,
+          targetRule,
+          readiness,
+          displayShortcut(shortcutFor(shortcutSnapshot, shortcutsEnabled, 'translate-compose')),
+        ),
+        composeKey: (event) =>
+          allSitesAccess &&
+          !android &&
+          listensFor(
+            shortcutSnapshot,
+            shortcutAssigned,
+            shortcutsEnabled,
+            'translate-compose',
+          )(event),
+        onComposeCommand: (source) => pageCommandBridge.deliver?.('compose', source),
+        onWarm: () => {
+          if (!__SAKUTTO_FAKE_ENGINE__ && liveSettings.engineSource !== 'local-server') {
+            void requestEngineWarm();
+          }
+        },
+        onSetup: () => {
+          void browser.runtime.sendMessage({ type: 'ui:open-setup' }).catch(() => {
+            readRuntimeLastError();
+          });
+        },
+        onTarget: (language: TargetLanguage) => {
+          if (!isTargetLanguage(language)) return;
+          void saveSettings({ composeTargetLanguage: language });
+        },
+        onPlacement: (placement) => {
+          void patchSiteRule(host, (current) => {
+            const next = { ...current, host, composePlacement: placement };
+            if (placement !== 'free') delete next.composeFreePoint;
+            return next;
+          });
+        },
+        onFollowSettings: () => {
+          void patchSiteRule(host, (current) => {
+            const next = { ...current, host };
+            delete next.composePlacement;
+            delete next.composeFreePoint;
+            return next;
+          });
+        },
+        onFreePoint: (point) => {
+          void patchSiteRule(host, (current) => {
+            const next = { ...current, host };
+            if (point) {
+              next.composePlacement = 'free';
+              next.composeFreePoint = point;
+            } else {
+              delete next.composeFreePoint;
+            }
+            return next;
+          });
+        },
+      });
+
+    const syncCompose = (
+      targetSettings: Settings,
+      targetRule: SiteRule,
+      readiness: TypedReadiness,
+    ): void => {
+      // On Android there are no browser keyboard shortcuts or desktop context menus, so
+      // keep ComposeController completely unloaded while the compose button setting is off.
+      if (android && !targetSettings.composeIcon) {
+        compose?.destroy();
+        compose = null;
+        return;
+      }
+      if (!compose) {
+        compose = createCompose(targetSettings, targetRule, readiness);
+        return;
+      }
+      compose.setLabels(composeLabels(readiness));
+      compose.setPreferences(
+        composePreferencesFor(
+          targetSettings,
+          targetRule,
+          readiness,
+          displayShortcut(shortcutFor(shortcutSnapshot, shortcutsEnabled, 'translate-compose')),
+        ),
+      );
+    };
+
+    pageCommandBridge.ensureCompose = (targetSettings, targetRule) => {
+      if (!compose) {
+        const currentReadiness = composeReadiness(
+          targetSettings,
+          modelState ? { state: modelState } : null,
+          plamoReady,
+          modelStatusKnown,
+        );
+        compose = createCompose(targetSettings, targetRule, currentReadiness);
+      }
+      return compose;
+    };
+
     const readiness = composeReadiness(
       settings,
       modelState ? { state: modelState } : null,
       plamoReady,
       modelStatusKnown,
     );
-    compose = new ComposeController(document, {
-      engine,
-      labels: composeLabels(readiness),
-      preferences: composePreferencesFor(
-        settings,
-        rule,
-        readiness,
-        displayShortcut(shortcutFor(shortcutSnapshot, shortcutsEnabled, 'translate-compose')),
-      ),
-      composeKey: (event) =>
-        allSitesAccess &&
-        listensFor(
-          shortcutSnapshot,
-          shortcutAssigned,
-          shortcutsEnabled,
-          'translate-compose',
-        )(event),
-      onComposeCommand: (source) => pageCommandBridge.deliver?.('compose', source),
-      onWarm: () => {
-        if (!__SAKUTTO_FAKE_ENGINE__) void requestEngineWarm();
-      },
-      onSetup: () => {
-        void browser.runtime.sendMessage({ type: 'ui:open-setup' }).catch(() => {
-          readRuntimeLastError();
-        });
-      },
-      onTarget: (language: TargetLanguage) => {
-        if (!isTargetLanguage(language)) return;
-        void saveSettings({ composeTargetLanguage: language });
-      },
-      onPlacement: (placement) => {
-        void patchSiteRule(host, (current) => {
-          const next = { ...current, host, composePlacement: placement };
-          if (placement !== 'free') delete next.composeFreePoint;
-          return next;
-        });
-      },
-      onFollowSettings: () => {
-        void patchSiteRule(host, (current) => {
-          const next = { ...current, host };
-          delete next.composePlacement;
-          delete next.composeFreePoint;
-          return next;
-        });
-      },
-      onFreePoint: (point) => {
-        void patchSiteRule(host, (current) => {
-          const next = { ...current, host };
-          if (point) {
-            next.composePlacement = 'free';
-            next.composeFreePoint = point;
-          } else {
-            delete next.composeFreePoint;
-          }
-          return next;
-        });
-      },
-    });
+    syncCompose(settings, rule, readiness);
 
     let liveRule = rule;
     // A passive all-sites injection must not surface the selection button on a host the
@@ -637,21 +714,36 @@ export function contentMain(): void {
       void saveSettings({ videoCaptionPositions: liveSettings.videoCaptionPositions });
     };
 
-    captions = new VideoCaptionSession(document, {
-      engine,
-      labels: captionLabels(),
-      preferences: captionPreferencesFor(liveSettings, liveRule, host),
-      onDisplayToggle: () => {
-        captionDisplayWrite += 1;
-        const nextDisplay =
-          liveSettings.videoCaptionDisplay === 'bilingual' ? 'replace' : 'bilingual';
-        liveSettings = { ...liveSettings, videoCaptionDisplay: nextDisplay };
-        captions?.setPreferences(captionPreferencesFor(liveSettings, liveRule, host));
-        void saveSettings({ videoCaptionDisplay: nextDisplay });
-      },
-      onPositionChange: persistCaptionPosition,
-    });
-    if (captionPreferencesFor(liveSettings, liveRule, host).enabled) captions.start();
+    const syncCaptions = (targetSettings: Settings, targetRule: SiteRule): void => {
+      const captionPrefs = captionPreferencesFor(targetSettings, targetRule, host);
+      if (!captionPrefs.enabled) {
+        captions?.stop();
+        captions = null;
+        return;
+      }
+      if (!captions) {
+        captions = new VideoCaptionSession(document, {
+          engine,
+          labels: captionLabels(),
+          preferences: captionPrefs,
+          onDisplayToggle: () => {
+            captionDisplayWrite += 1;
+            const nextDisplay =
+              liveSettings.videoCaptionDisplay === 'bilingual' ? 'replace' : 'bilingual';
+            liveSettings = { ...liveSettings, videoCaptionDisplay: nextDisplay };
+            captions?.setPreferences(captionPreferencesFor(liveSettings, liveRule, host));
+            void saveSettings({ videoCaptionDisplay: nextDisplay });
+          },
+          onPositionChange: persistCaptionPosition,
+        });
+        captions.start();
+        return;
+      }
+      captions.setLabels(captionLabels());
+      captions.setPreferences(captionPrefs);
+    };
+    pageCommandBridge.syncCaptions = syncCaptions;
+    syncCaptions(liveSettings, liveRule);
 
     const onMailLanguagesChange = (languages: { auto: string[]; never: string[] }): void => {
       mailLanguagesWrite += 1;
@@ -665,26 +757,57 @@ export function contentMain(): void {
         gmailNeverTranslateLangs: languages.never,
       });
     };
-    gmailBanner = new GmailBannerController(document, {
-      engine,
-      labels: mailBannerLabels(),
-      preferences: mailBannerPreferencesFor(liveSettings, liveRule, host, 'gmail'),
-      onWarm: () => {
-        if (!__SAKUTTO_FAKE_ENGINE__) void requestEngineWarm();
-      },
-      onLanguagesChange: onMailLanguagesChange,
-    });
-    outlookBanner = new OutlookBannerController(document, {
-      engine,
-      labels: mailBannerLabels(),
-      preferences: mailBannerPreferencesFor(liveSettings, liveRule, host, 'outlook'),
-      onWarm: () => {
-        if (!__SAKUTTO_FAKE_ENGINE__) void requestEngineWarm();
-      },
-      onLanguagesChange: onMailLanguagesChange,
-    });
-    gmailBanner.start();
-    outlookBanner.start();
+
+    const syncMailBanners = (targetSettings: Settings, targetRule: SiteRule): void => {
+      const gmailPrefs = mailBannerPreferencesFor(targetSettings, targetRule, host, 'gmail');
+      if (gmailPrefs.enabled) {
+        if (!gmailBanner) {
+          gmailBanner = new GmailBannerController(document, {
+            engine,
+            labels: mailBannerLabels(),
+            preferences: gmailPrefs,
+            onWarm: () => {
+              if (!__SAKUTTO_FAKE_ENGINE__ && liveSettings.engineSource !== 'local-server') {
+                void requestEngineWarm();
+              }
+            },
+            onLanguagesChange: onMailLanguagesChange,
+          });
+          gmailBanner.start();
+        } else {
+          gmailBanner.setLabels(mailBannerLabels());
+          gmailBanner.setPreferences(gmailPrefs);
+        }
+      } else if (gmailBanner) {
+        gmailBanner.dispose();
+        gmailBanner = null;
+      }
+
+      const outlookPrefs = mailBannerPreferencesFor(targetSettings, targetRule, host, 'outlook');
+      if (outlookPrefs.enabled) {
+        if (!outlookBanner) {
+          outlookBanner = new OutlookBannerController(document, {
+            engine,
+            labels: mailBannerLabels(),
+            preferences: outlookPrefs,
+            onWarm: () => {
+              if (!__SAKUTTO_FAKE_ENGINE__ && liveSettings.engineSource !== 'local-server') {
+                void requestEngineWarm();
+              }
+            },
+            onLanguagesChange: onMailLanguagesChange,
+          });
+          outlookBanner.start();
+        } else {
+          outlookBanner.setLabels(mailBannerLabels());
+          outlookBanner.setPreferences(outlookPrefs);
+        }
+      } else if (outlookBanner) {
+        outlookBanner.dispose();
+        outlookBanner = null;
+      }
+    };
+    syncMailBanners(liveSettings, liveRule);
 
     floatingMenu = new FloatingMenuController(document, {
       labels: floatingMenuLabels(),
@@ -757,8 +880,12 @@ export function contentMain(): void {
       },
     });
 
-    const detected = await detectDocumentLanguage(document);
-    session.setDetectedLanguage(detected);
+    // Defer DOM language detection until a page translation is requested, unless this site
+    // is configured to translate automatically on arrival.
+    if (rule.auto === 'always') {
+      languageDetected = true;
+      session.setDetectedLanguage(await detectDocumentLanguage(document));
+    }
 
     // A selection made before this script initialized never fired `selectionchange` here.
     // Offer the existing highlight once — on every injection path, never as a page
@@ -771,6 +898,7 @@ export function contentMain(): void {
       const positionWriteId = captionPositionWrite;
       const popupWidthId = popupWidthWrite;
       const mailLanguagesId = mailLanguagesWrite;
+      const previousEngineSource = engineSource;
       const [nextSettings, nextRule] = await Promise.all([loadSettings(), loadSiteRule(host)]);
       const display =
         writeId === captionDisplayWrite
@@ -803,6 +931,20 @@ export function contentMain(): void {
       liveRule = nextRule;
       syncSelectionSuppression();
       engineSource = liveSettings.engineSource;
+      if (engineSource === 'local-server') {
+        plamoReady = true;
+        folderNeedsUserAction = false;
+        modelStatusKnown = true;
+        session.setFolderGrantUiActive(false);
+      } else if (previousEngineSource === 'local-server' && !__SAKUTTO_FAKE_ENGINE__) {
+        modelStatusKnown = false;
+        void readModelStatus().then((ok) => {
+          if (ok) {
+            session.setFolderGrantUiActive(folderNeedsUserAction);
+            void applyStored();
+          }
+        });
+      }
       shortcutsEnabled = liveSettings.shortcutsEnabled;
       session.setLabels(overlayLabels());
       session.setPreferences(preferencesFor(liveSettings, liveRule, host));
@@ -812,23 +954,9 @@ export function contentMain(): void {
         plamoReady,
         modelStatusKnown,
       );
-      compose?.setLabels(composeLabels(readiness));
-      compose?.setPreferences(
-        composePreferencesFor(
-          liveSettings,
-          liveRule,
-          readiness,
-          displayShortcut(shortcutFor(shortcutSnapshot, shortcutsEnabled, 'translate-compose')),
-        ),
-      );
-      captions?.setLabels(captionLabels());
-      captions?.setPreferences(captionPreferencesFor(liveSettings, liveRule, host));
-      gmailBanner?.setLabels(mailBannerLabels());
-      gmailBanner?.setPreferences(mailBannerPreferencesFor(liveSettings, liveRule, host, 'gmail'));
-      outlookBanner?.setLabels(mailBannerLabels());
-      outlookBanner?.setPreferences(
-        mailBannerPreferencesFor(liveSettings, liveRule, host, 'outlook'),
-      );
+      syncCompose(liveSettings, liveRule, readiness);
+      syncCaptions(liveSettings, liveRule);
+      syncMailBanners(liveSettings, liveRule);
       floatingMenu?.setLabels(floatingMenuLabels());
       floatingMenu?.setPreferences({
         mode: liveSettings.floatingButton,
@@ -867,7 +995,7 @@ export function contentMain(): void {
     }
 
     if (rule.auto === 'always') {
-      if (!__SAKUTTO_FAKE_ENGINE__) {
+      if (!__SAKUTTO_FAKE_ENGINE__ && liveSettings.engineSource !== 'local-server') {
         void requestEngineWarm();
         void requestEngineTier(session, false, captions);
       }
@@ -900,15 +1028,18 @@ export function contentMain(): void {
     lastCommandAt = now;
     const session = await sessionPromise;
     const [liveSettings, liveRule] = await Promise.all([loadSettings(), loadSiteRule(host)]);
-    captions?.setPreferences(captionPreferencesFor(liveSettings, liveRule, host));
+    pageCommandBridge.syncCaptions?.(liveSettings, liveRule);
     // Keyboard assignment is enforced by `commands.onCommand`. This path also serves the
     // popup and context menu.
-    if (!__SAKUTTO_FAKE_ENGINE__) {
+    if (!__SAKUTTO_FAKE_ENGINE__ && liveSettings.engineSource !== 'local-server') {
       void requestEngineWarm();
       void requestEngineTier(session, false, captions);
     }
     if (command === 'compose') {
-      if (shouldHandleComposeCommand(document)) compose?.handleShortcut(source);
+      if (shouldHandleComposeCommand(document)) {
+        const controller = compose ?? pageCommandBridge.ensureCompose?.(liveSettings, liveRule);
+        controller?.handleShortcut(source);
+      }
       return session.state();
     }
     const armed = await armFolderCommand(command);
@@ -920,6 +1051,10 @@ export function contentMain(): void {
       // The menu may have collapsed the document selection while the arm round-trip ran.
       session.translateSelection(selection.text, selection.rect);
       return session.state();
+    }
+    if (!languageDetected && (command === 'toggle' || command === 'bilingual')) {
+      languageDetected = true;
+      session.setDetectedLanguage(await detectDocumentLanguage(document));
     }
     await session.handle(command);
     return session.state();
@@ -1038,7 +1173,11 @@ export function contentMain(): void {
     if (isPageStateRequest(message)) {
       // Only the popup asks for page state: this is an explicit look at the page.
       markExplicitPageActivation();
-      void sessionPromise.then((session) => {
+      void sessionPromise.then(async (session) => {
+        if (!languageDetected) {
+          languageDetected = true;
+          session.setDetectedLanguage(await detectDocumentLanguage(document));
+        }
         sendResponse(session.state());
       });
       return true;

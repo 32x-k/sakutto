@@ -1,5 +1,6 @@
 import { isModelChangedError } from '@/engine/errors';
 import type { GlossaryEntry, TranslateOptions } from '@/engine/types';
+import { isAndroidPlatform } from '@/shared/browser';
 import {
   canonicalLanguage,
   isTargetLanguage,
@@ -1389,7 +1390,10 @@ export class ComposeController {
     this.onCompositionEnd = (event) => this.handleCompositionEnd(event);
     this.onScroll = () => this.scheduleReposition();
     this.bindDocuments();
-    this.doc.defaultView?.addEventListener('scroll', this.onScroll, true);
+    this.doc.defaultView?.addEventListener('scroll', this.onScroll, {
+      capture: true,
+      passive: true,
+    });
     this.doc.defaultView?.addEventListener('resize', this.onScroll);
   }
 
@@ -1482,9 +1486,10 @@ export class ComposeController {
   }
 
   private bindDocuments(): void {
+    const android = isAndroidPlatform();
     for (const doc of collectDocuments(this.doc)) {
       const view = doc.defaultView;
-      if (view && !this.boundWindows.has(view)) {
+      if (!android && view && !this.boundWindows.has(view)) {
         // Window capture runs before a page that stopPropagation()s on its editor.
         view.addEventListener('keydown', this.onKeyDown, true);
         this.boundWindows.add(view);
@@ -1493,7 +1498,7 @@ export class ComposeController {
       doc.addEventListener('focusin', this.onFocusIn, true);
       doc.addEventListener('focusout', this.onFocusOut, true);
       doc.addEventListener('input', this.onInput, true);
-      doc.addEventListener('contextmenu', this.onContextMenu, true);
+      if (!android) doc.addEventListener('contextmenu', this.onContextMenu, true);
       doc.addEventListener('compositionend', this.onCompositionEnd, true);
       this.boundDocs.add(doc);
     }
@@ -2138,6 +2143,7 @@ export class ComposeController {
   }
 
   private scheduleReposition(): void {
+    if (!this.field && !this.panelOpen) return;
     if (this.scrollFrame !== 0) return;
     const view = this.doc.defaultView;
     if (!view) {

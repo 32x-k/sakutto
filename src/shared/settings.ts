@@ -12,6 +12,7 @@ import {
   normalizeTimeoutMs,
 } from '@/engine/local-server/url';
 import type { EngineSource } from './engine-status';
+import { isAndroidPlatform } from './browser';
 import { normalizeCaptionCustomHosts } from '@/captions/custom-hosts';
 import { normalizeGlossary } from './glossary';
 import {
@@ -471,12 +472,26 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
   floatingButtonPosition: null,
 });
 
-export function createDefaultSettings(uiLanguage: string): Settings {
+export interface SettingsPlatformOptions {
+  /** Overrides runtime Android detection (for tests). Defaults to `isAndroidPlatform()`. */
+  android?: boolean;
+}
+
+export function createDefaultSettings(
+  uiLanguage: string,
+  options: SettingsPlatformOptions = {},
+): Settings {
+  const android = options.android ?? isAndroidPlatform();
   return {
     ...DEFAULT_SETTINGS,
     glossary: [],
     shortcutsEnabled: defaultShortcutEnabled(),
     targetLanguage: resolveTargetLanguage(uiLanguage),
+    engineSource: android ? 'local-server' : 'in-browser',
+    // On Android, desktop-oriented overlays stay off by default to keep every tab light;
+    // users can still turn them on anytime in Settings.
+    composeIcon: !android,
+    gmailTranslateBanner: !android,
   };
 }
 
@@ -492,8 +507,12 @@ export function isIdleMinutes(value: unknown): value is IdleMinutes {
   return value === 0 || value === 1 || value === 5 || value === 15;
 }
 
-export function normalizeSettings(value: unknown, uiLanguage: string): Settings {
-  const defaults = createDefaultSettings(uiLanguage);
+export function normalizeSettings(
+  value: unknown,
+  uiLanguage: string,
+  options: SettingsPlatformOptions = {},
+): Settings {
+  const defaults = createDefaultSettings(uiLanguage, options);
   if (!isRecord(value) || value.schemaVersion !== SETTINGS_SCHEMA_VERSION) return defaults;
 
   const gmailLanguages = normalizeGmailTranslateLanguages(value);
@@ -514,13 +533,13 @@ export function normalizeSettings(value: unknown, uiLanguage: string): Settings 
     idleMinutes: isIdleMinutes(value.idleMinutes) ? value.idleMinutes : defaults.idleMinutes,
     tier: isTierPreference(value.tier) ? value.tier : defaults.tier,
     pace: isTranslationPace(value.pace) ? value.pace : defaults.pace,
-    composeIcon: value.composeIcon !== false,
+    composeIcon: typeof value.composeIcon === 'boolean' ? value.composeIcon : defaults.composeIcon,
     shortcutsEnabled: normalizeShortcutEnabled(value.shortcutsEnabled),
     composeTargetLanguage: normalizeComposeTarget(value.composeTargetLanguage),
     composeInstantReplace: value.composeInstantReplace === true,
     composePlacement: isComposePlacement(value.composePlacement) ? value.composePlacement : 'above',
     selectedModelId: normalizeSelectedModelId(value.selectedModelId),
-    engineSource: isEngineSource(value.engineSource) ? value.engineSource : 'in-browser',
+    engineSource: isEngineSource(value.engineSource) ? value.engineSource : defaults.engineSource,
     localServerUrl: normalizeServerUrl(
       typeof value.localServerUrl === 'string' ? value.localServerUrl : DEFAULT_LOCAL_SERVER_URL,
     ),
@@ -536,7 +555,10 @@ export function normalizeSettings(value: unknown, uiLanguage: string): Settings 
     videoCaptionOriginalToggle: value.videoCaptionOriginalToggle !== false,
     videoCaptionPositions: normalizeVideoCaptionPositions(value.videoCaptionPositions),
     captionCustomHosts: normalizeCaptionCustomHosts(value.captionCustomHosts),
-    gmailTranslateBanner: value.gmailTranslateBanner !== false,
+    gmailTranslateBanner:
+      typeof value.gmailTranslateBanner === 'boolean'
+        ? value.gmailTranslateBanner
+        : defaults.gmailTranslateBanner,
     gmailAutoTranslateLangs: gmailLanguages.auto,
     gmailNeverTranslateLangs: gmailLanguages.never,
     floatingButton: isFloatingButtonMode(value.floatingButton) ? value.floatingButton : 'auto',

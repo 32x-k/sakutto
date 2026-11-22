@@ -247,6 +247,25 @@ describe('settings defaults', () => {
     });
   });
 
+  it('defaults Android to local-server while preserving explicit engine choices', () => {
+    const minimal = { schemaVersion: SETTINGS_SCHEMA_VERSION, targetLanguage: 'en' };
+    expect(normalizeSettings(minimal, 'en-US', { android: true }).engineSource).toBe(
+      'local-server',
+    );
+    expect(
+      normalizeSettings({ ...minimal, engineSource: 'in-browser' }, 'en-US', { android: true })
+        .engineSource,
+    ).toBe('in-browser');
+    expect(
+      normalizeSettings({ ...minimal, engineSource: 'local-server' }, 'en-US', { android: false })
+        .engineSource,
+    ).toBe('local-server');
+    expect(
+      normalizeSettings({ ...minimal, engineSource: 'invalid' }, 'en-US', { android: true })
+        .engineSource,
+    ).toBe('local-server');
+  });
+
   it('defaults video caption translation off and bilingual display on', () => {
     const settings = normalizeSettings(
       {
@@ -539,6 +558,37 @@ describe('settings defaults', () => {
         'en-US',
       ).composeIcon,
     ).toBe(false);
+  });
+
+  it('disables desktop-oriented overlays by default on Android while preserving explicit opt-in', () => {
+    const androidDefaults = createDefaultSettings('ja-JP', { android: true });
+    expect(androidDefaults.composeIcon).toBe(false);
+    expect(androidDefaults.gmailTranslateBanner).toBe(false);
+    expect(androidDefaults.translateVideoCaptions).toBe(false);
+
+    const normalizedDefault = normalizeSettings(
+      { schemaVersion: SETTINGS_SCHEMA_VERSION, targetLanguage: 'ja' },
+      'ja-JP',
+      { android: true },
+    );
+    expect(normalizedDefault.composeIcon).toBe(false);
+    expect(normalizedDefault.gmailTranslateBanner).toBe(false);
+    expect(normalizedDefault.translateVideoCaptions).toBe(false);
+
+    const optedIn = normalizeSettings(
+      {
+        schemaVersion: SETTINGS_SCHEMA_VERSION,
+        targetLanguage: 'ja',
+        composeIcon: true,
+        gmailTranslateBanner: true,
+        translateVideoCaptions: true,
+      },
+      'ja-JP',
+      { android: true },
+    );
+    expect(optedIn.composeIcon).toBe(true);
+    expect(optedIn.gmailTranslateBanner).toBe(true);
+    expect(optedIn.translateVideoCaptions).toBe(true);
   });
 
   it('keeps valid stored values and repairs invalid ones', () => {

@@ -1,4 +1,5 @@
 import { browser } from 'wxt/browser';
+import { isAndroidPlatform } from '@/shared/browser';
 import { readRuntimeLastError } from '@/shared/runtime-last-error';
 import { PDF_COMMAND } from '@/shared/shortcuts';
 import { PDF_MENU_URL_PATTERNS } from '@/shared/pdf';
@@ -34,7 +35,7 @@ export function flushContextMenuInstall(): Promise<void> {
 
 async function installContextMenusOnce(): Promise<void> {
   if (menusReady) return;
-  if (!browser.contextMenus) {
+  if (isAndroidPlatform() || !browser.contextMenus) {
     menusReady = true;
     return;
   }

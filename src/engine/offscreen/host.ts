@@ -399,6 +399,7 @@ export class EngineHost {
   private gpuFallbackReason: GpuFallbackReason | null = null;
   private gpuDiagnostic: GpuDiagnostic | null = null;
   private engineSource: EngineSource = 'in-browser';
+  private probedCapabilities = false;
   private localConfig: LocalServerConfig = localServerConfigFromSettings(null);
   private localScheduler: JobScheduler | null = null;
   private folderSession: SharedFolderSession | null = null;
@@ -495,22 +496,34 @@ export class EngineHost {
   }
 
   private async createServices(): Promise<EngineServices> {
-    const capabilities = await probeCapabilities();
-    this.gpuDiagnostic = mergeGpuDiagnostic(lastGpuDiagnostic(), null);
-    const gpuProbeTimedOut =
-      capabilities.webgpu === 'unavailable' && /timed out/i.test(this.gpuDiagnostic?.error ?? '');
-    const probe = {
-      webgpu: capabilities.webgpu === 'ready',
-      hardwareConcurrency: capabilities.hardwareConcurrency,
-      fastBatches: capabilities.gpuFastBatches === true,
-      sharedMemory: capabilities.crossOriginIsolated,
-    };
     const stored = browser.storage?.local ? await loadSettings().catch(() => null) : null;
     // Chrome's offscreen document has no chrome.storage. The service worker pushes
     // engineSource, the selected model, and the idle/prewarm snapshot. A record read
     // here only exists where storage is actually available (Firefox's engine frame).
     if (stored) this.applyStoredSettings(stored);
     this.storedModelId = stored ? normalizeSelectedModelId(stored.selectedModelId) : null;
+    const localOnly = this.engineSource === 'local-server';
+    this.probedCapabilities = !localOnly;
+    const capabilities = localOnly
+      ? {
+          webgpu: 'unavailable' as const,
+          hardwareConcurrency:
+            typeof navigator === 'undefined' ? 4 : navigator.hardwareConcurrency || 4,
+          gpuFastBatches: false,
+          crossOriginIsolated: false,
+        }
+      : await probeCapabilities();
+    if (!localOnly) this.gpuDiagnostic = mergeGpuDiagnostic(lastGpuDiagnostic(), null);
+    const gpuProbeTimedOut =
+      !localOnly &&
+      capabilities.webgpu === 'unavailable' &&
+      /timed out/i.test(this.gpuDiagnostic?.error ?? '');
+    const probe = {
+      webgpu: capabilities.webgpu === 'ready',
+      hardwareConcurrency: capabilities.hardwareConcurrency,
+      fastBatches: capabilities.gpuFastBatches === true,
+      sharedMemory: capabilities.crossOriginIsolated,
+    };
     const tier = stored?.tier ?? this.runtimePrefs?.tier ?? 'auto';
     if (gpuProbeTimedOut && (tier === 'auto' || tier === 'g')) {
       // The probe could not get an adapter before the GPU load. Show why Auto is on the CPU
@@ -1294,6 +1307,15 @@ export class EngineHost {
     this.localScheduler?.setConcurrency(config.parallel);
     if (previous === 'in-browser' && source === 'local-server' && this.servicesTask) {
       void this.unloadInBrowserRuntime();
+    } else if (
+      previous === 'local-server' &&
+      source === 'in-browser' &&
+      this.servicesTask &&
+      !this.probedCapabilities
+    ) {
+      // Capabilities were skipped while starting in local-server mode; re-open on the next
+      // in-browser request so WebGPU detection and GPU diagnostics run normally.
+      this.servicesTask = null;
     }
   }
 

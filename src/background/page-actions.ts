@@ -66,10 +66,7 @@ export function installPageActionListeners(engine?: EngineClient): void {
   browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (changeInfo.status === 'loading') translationCanceller?.cancelTab(tabId);
     if (changeInfo.status !== 'complete' || !tab.url) return;
-    void injectIfAlways(tabId, tab.url);
-    void injectIfCaptions(tabId, tab.url);
-    void injectIfGmailBanner(tabId, tab.url);
-    void injectIfOutlookBanner(tabId, tab.url);
+    void maybeInjectOnTabComplete(tabId, tab.url);
   });
 
   browser.tabs.onRemoved.addListener((tabId) => {
@@ -190,13 +187,36 @@ async function runCommand(tabId: number, command: PageCommandName): Promise<void
   await requestPageCommand(tabId, command, frameId);
 }
 
-async function injectIfAlways(tabId: number, url: string): Promise<void> {
+/**
+ * Single tab-complete check for auto-translate, video captions, and mail banners.
+ * Reads settings and the site rule once per completed navigation and only checks
+ * origin permissions when at least one feature actually applies to this host.
+ */
+async function maybeInjectOnTabComplete(tabId: number, url: string): Promise<void> {
   const host = pageHost(url);
   const pattern = originPattern(url);
   if (!host || !pattern) return;
 
-  const rule = await loadSiteRule(host);
-  if (rule.auto !== 'always') return;
+  const [rule, settings] = await Promise.all([loadSiteRule(host), loadSettings()]);
+  const wantsAlways = rule.auto === 'always';
+  const wantsCaptions = shouldAutoInjectCaptions({
+    settingOn: settings.translateVideoCaptions,
+    host,
+    originAllowed: true,
+    customHosts: settings.captionCustomHosts,
+  });
+  const wantsGmail = shouldAutoInjectGmailBanner({
+    settingOn: settings.gmailTranslateBanner,
+    host,
+    originAllowed: true,
+  });
+  const wantsOutlook = shouldAutoInjectOutlookBanner({
+    settingOn: settings.gmailTranslateBanner,
+    host,
+    originAllowed: true,
+  });
+
+  if (!wantsAlways && !wantsCaptions && !wantsGmail && !wantsOutlook) return;
 
   const allowed = await browser.permissions.contains({ origins: [pattern] }).catch(() => false);
   if (!allowed) return;

@@ -20,6 +20,7 @@ import {
   isModelChangedError,
 } from '@/engine/errors';
 import type { EngineKind, GlossaryEntry, TranslateOptions, TranslationChunk } from '@/engine/types';
+import { isAndroidPlatform } from '@/shared/browser';
 import { glossaryKey, mergeGlossary } from '@/shared/glossary';
 import {
   chooseTargetLanguage,
@@ -371,6 +372,7 @@ export class PageSession {
   private readonly observedRoots = new Map<Node, MutationObserver>();
   private readonly visibilities = new Map<Document, IntersectionObserver>();
   private readonly pointerRoots = new Set<EventTarget>();
+  private readonly hoverRoots = new Set<EventTarget>();
   private readonly frameLoads = new Map<HTMLIFrameElement, () => void>();
   private readonly expected = new WeakMap<Text, string>();
   /**
@@ -477,8 +479,10 @@ export class PageSession {
       if (this.active) this.pump();
     };
     this.onScroll = () => {
+      if (!this.active && !this.selectionShown && !this.overlay.selectionIconVisible()) return;
       this.overlay.hideOriginal();
       this.followSelection();
+      if (!this.active) return;
       const top = this.doc.defaultView?.scrollY ?? 0;
       const next = top >= this.lastScroll ? 'down' : 'up';
       this.lastScroll = top;
@@ -565,8 +569,9 @@ export class PageSession {
     this.onFocusIn = (event) => this.showHover(event);
     this.onFocusOut = (event) => this.hideHover(event);
     this.onResize = () => {
+      if (!this.active && !this.selectionShown && !this.overlay.selectionIconVisible()) return;
       this.followSelection();
-      this.bindVisibility();
+      if (this.active) this.bindVisibility();
     };
 
     this.doc.addEventListener('visibilitychange', this.onVisibility);
@@ -576,9 +581,10 @@ export class PageSession {
     this.doc.defaultView?.addEventListener('pageshow', this.onPageShow);
     this.doc.defaultView?.addEventListener('popstate', this.onPopState);
     this.doc.defaultView?.addEventListener('resize', this.onResize);
-    this.bindHistory();
-    this.bindObservers();
-    this.bindVisibility();
+    // Keep untranslated tabs light: only bind selection and (on desktop) keyboard fallback
+    // listeners until a page translation actually starts. MutationObserver, IntersectionObserver,
+    // history patching, frame scanning, and hover listeners attach lazily in `translate()`.
+    this.bindSelectionListeners();
   }
 
   setDetectedLanguage(language: string | null): void {
@@ -612,8 +618,9 @@ export class PageSession {
     const tier = next.tier ?? previous.tier;
     this.prefs = { ...next, tier };
     if (
+      this.active &&
       lookaheadScreens(previous.tier, previous.pace, previous.engineSource) !==
-      lookaheadScreens(tier, this.prefs.pace, this.prefs.engineSource)
+        lookaheadScreens(tier, this.prefs.pace, this.prefs.engineSource)
     ) {
       this.bindVisibility();
     }
@@ -744,6 +751,7 @@ export class PageSession {
     this.rememberSourceLanguage();
     this.alignTargetLanguage();
     this.doc.documentElement.lang = this.prefs.targetLanguage;
+    this.bindHistory();
     this.publishState();
     await this.requestScan();
     this.pump();
@@ -771,6 +779,8 @@ export class PageSession {
     for (const item of this.live.values()) this.resetLive(item);
     this.live.clear();
     this.liveByBlock.clear();
+    this.skippedBlocks.clear();
+    this.disconnectActiveObservers();
     this.selection = null;
     this.selectionShown = false;
     this.pointerDown = false;
@@ -2375,6 +2385,32 @@ export class PageSession {
     }, this.debounceMs);
   }
 
+  private bindSelectionListeners(): void {
+    const documents = collectDocuments(this.doc);
+    this.bindKeys(documents);
+    for (const document of documents) {
+      this.bindPointerRoot(document);
+      for (const shadow of collectShadowRoots(document)) this.bindPointerRoot(shadow);
+    }
+  }
+
+  private disconnectActiveObservers(): void {
+    for (const observer of this.observers) observer.disconnect();
+    this.observers = [];
+    this.observedRoots.clear();
+    for (const observer of this.visibilities.values()) observer.disconnect();
+    this.visibilities.clear();
+    this.unbindHoverPointers();
+    for (const [frame, onLoad] of this.frameLoads) frame.removeEventListener('load', onLoad);
+    this.frameLoads.clear();
+    this.historyUnpatch?.();
+    this.historyUnpatch = null;
+    if (this.scanTimer !== null) {
+      clearTimeout(this.scanTimer);
+      this.scanTimer = null;
+    }
+  }
+
   /**
    * Observers are attached incrementally instead of being rebuilt. Disconnecting them
    * on every scan dropped the mutations that arrived while a scan was walking, which is
@@ -2407,17 +2443,23 @@ export class PageSession {
       }
     }
 
-    this.bindKeys();
-    for (const document of documents) this.bindPointerRoot(document);
+    this.bindKeys(documents);
+    const hover = !isAndroidPlatform();
     for (const document of documents) {
-      for (const shadow of collectShadowRoots(document)) this.bindPointerRoot(shadow);
+      this.bindPointerRoot(document);
+      if (hover) this.bindHoverRoot(document);
+      for (const shadow of collectShadowRoots(document)) {
+        this.bindPointerRoot(shadow);
+        if (hover) this.bindHoverRoot(shadow);
+      }
     }
     this.watchFrames();
   }
 
-  private bindKeys(): void {
+  private bindKeys(documents: readonly Document[] = collectDocuments(this.doc)): void {
+    if (isAndroidPlatform()) return;
     const live = new Set<Window>();
-    for (const document of collectDocuments(this.doc)) {
+    for (const document of documents) {
       const view = document.defaultView;
       if (!view) continue;
       live.add(view);
@@ -2450,26 +2492,38 @@ export class PageSession {
 
   private bindPointerRoot(root: Document | ShadowRoot): void {
     if (this.pointerRoots.has(root)) return;
-    root.addEventListener('pointerover', this.onPointerOver);
-    root.addEventListener('pointerout', this.onPointerOut);
     root.addEventListener('pointerdown', this.onPointerDown);
     root.addEventListener('pointerup', this.onPointerUp);
     root.addEventListener('pointercancel', this.onPointerUp);
-    root.addEventListener('focusin', this.onFocusIn);
-    root.addEventListener('focusout', this.onFocusOut);
     if (isSelectionRoot(root)) root.addEventListener('selectionchange', this.onSelectionChange);
     this.pointerRoots.add(root);
   }
 
-  private unbindPointers(): void {
-    for (const root of this.pointerRoots) {
+  private bindHoverRoot(root: Document | ShadowRoot): void {
+    if (this.hoverRoots.has(root)) return;
+    root.addEventListener('pointerover', this.onPointerOver);
+    root.addEventListener('pointerout', this.onPointerOut);
+    root.addEventListener('focusin', this.onFocusIn);
+    root.addEventListener('focusout', this.onFocusOut);
+    this.hoverRoots.add(root);
+  }
+
+  private unbindHoverPointers(): void {
+    for (const root of this.hoverRoots) {
       root.removeEventListener('pointerover', this.onPointerOver);
       root.removeEventListener('pointerout', this.onPointerOut);
+      root.removeEventListener('focusin', this.onFocusIn);
+      root.removeEventListener('focusout', this.onFocusOut);
+    }
+    this.hoverRoots.clear();
+  }
+
+  private unbindPointers(): void {
+    this.unbindHoverPointers();
+    for (const root of this.pointerRoots) {
       root.removeEventListener('pointerdown', this.onPointerDown);
       root.removeEventListener('pointerup', this.onPointerUp);
       root.removeEventListener('pointercancel', this.onPointerUp);
-      root.removeEventListener('focusin', this.onFocusIn);
-      root.removeEventListener('focusout', this.onFocusOut);
       if (isSelectionRoot(root)) {
         root.removeEventListener('selectionchange', this.onSelectionChange);
       }
@@ -2503,6 +2557,7 @@ export class PageSession {
   }
 
   private bindHistory(): void {
+    if (this.historyUnpatch) return;
     const view = this.doc.defaultView;
     const history = view?.history;
     if (!view || !history) return;

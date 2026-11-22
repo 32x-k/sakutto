@@ -40,6 +40,8 @@ import {
 import { hasLicenseConsent } from '@/shared/agreement';
 import type { Settings, TierPreference } from '@/shared/settings';
 import { loadSettings, saveSettings } from '@/shared/storage';
+import { isFirefoxBuild } from '@/shared/browser';
+import { DirectLocalServerEngine } from './local-server-direct';
 import { isModelFolderToBrowserResult, type ModelFolderToBrowserResult } from '@/shared/messages';
 import type { OffscreenController } from './offscreen-lifecycle';
 
@@ -63,6 +65,18 @@ type RequestWithoutId =
 const FOLDER_TRANSFER_TIMEOUT_MS = 15 * 60 * 1000;
 const DOWNLOAD_ATTACH_ATTEMPTS = 3;
 const DOWNLOAD_ATTACH_DELAY_MS = 500;
+/**
+ * Close an idle engine host in `local-server` mode after this many milliseconds so the
+ * hidden offscreen/iframe document and its Firefox keep-alive timer release RAM and let
+ * the background event page suspend.
+ */
+export const LOCAL_SERVER_IDLE_CLOSE_MS = 60_000;
+
+export interface EngineClientOptions {
+  directLocalServer?: boolean;
+  /** Override the idle close delay for `local-server` mode (`0` disables idle close). */
+  localServerIdleCloseMs?: number;
+}
 
 interface PendingRequest {
   resolve(value: unknown): void;
@@ -110,11 +124,44 @@ export class EngineClient {
   private sourceKey = '';
   private runtimeKey = '';
   private pushedModelId: ModelId | null = null;
+  private lastEngineSource: Settings['engineSource'] = 'in-browser';
+  private idleCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly localServerIdleCloseMs: number;
+  private readonly directLocalServer: boolean;
+  private directLocal: DirectLocalServerEngine | null = null;
   private inbox: Promise<void> = Promise.resolve();
 
-  constructor(private readonly controller: OffscreenController) {}
+  constructor(
+    private readonly controller: OffscreenController,
+    options: EngineClientOptions = {},
+  ) {
+    this.localServerIdleCloseMs = options.localServerIdleCloseMs ?? LOCAL_SERVER_IDLE_CLOSE_MS;
+    this.directLocalServer = options.directLocalServer ?? isFirefoxBuild();
+  }
+
+  private async resolveDirectLocalServer(settings?: Settings | null): Promise<Settings | null> {
+    const current = settings === undefined ? await loadSettings().catch(() => null) : settings;
+    return this.directLocalServer && current?.engineSource === 'local-server' ? current : null;
+  }
+
+  private directFor(settings: Settings): DirectLocalServerEngine {
+    this.directLocal ??= new DirectLocalServerEngine(settings);
+    this.directLocal.applySettings(settings);
+    return this.directLocal;
+  }
+
+  private closePortForDirect(): void {
+    if (!this.port) return;
+    this.dropPort();
+    void this.controller.close();
+  }
 
   async status(): Promise<EngineStatus> {
+    const direct = await this.resolveDirectLocalServer();
+    if (direct) {
+      this.closePortForDirect();
+      return this.directFor(direct).status();
+    }
     await this.ensureSource();
     const value = await this.request({ type: 'status' }, { timeoutMs: 15_000 });
     if (!isEngineStatus(value)) throw hostError('The engine host returned an invalid status.');
@@ -143,6 +190,11 @@ export class EngineClient {
   }
 
   async warmModel(): Promise<ModelStatus> {
+    const direct = await this.resolveDirectLocalServer();
+    if (direct) {
+      this.closePortForDirect();
+      return this.directFor(direct).warmModel();
+    }
     await this.ensureSource();
     const value = await this.request({ type: 'model-warm' }, { timeoutMs: 120_000, retry: false });
     if (!isModelStatus(value)) throw hostError('The engine host returned an invalid status.');
@@ -209,6 +261,12 @@ export class EngineClient {
   }
 
   async clearCache(): Promise<void> {
+    const direct = await this.resolveDirectLocalServer();
+    if (direct) {
+      this.closePortForDirect();
+      await this.directFor(direct).clearCache();
+      return;
+    }
     await this.request({ type: 'cache-clear' }, { timeoutMs: 15_000 });
   }
 
@@ -218,6 +276,12 @@ export class EngineClient {
   }
 
   async setSource(settings: Settings): Promise<void> {
+    const direct = await this.resolveDirectLocalServer(settings);
+    if (direct) {
+      this.closePortForDirect();
+      this.directFor(direct);
+      return;
+    }
     const port = await this.connect();
     await this.pushSource(port, settings);
   }
@@ -238,6 +302,11 @@ export class EngineClient {
    * still processing that event.
    */
   syncStoredSettings(settings: Settings): void {
+    if (this.directLocalServer && settings.engineSource === 'local-server') {
+      this.closePortForDirect();
+      this.directFor(settings);
+      return;
+    }
     setTimeout(() => {
       const port = this.port;
       if (!port) return;
@@ -265,6 +334,11 @@ export class EngineClient {
     }
     const settings = await loadSettings().catch(() => null);
     if (!settings) return;
+    const direct = await this.resolveDirectLocalServer(settings);
+    if (direct) {
+      this.directFor(direct);
+      return;
+    }
     await this.setSource(settings);
   }
 
@@ -344,6 +418,15 @@ export class EngineClient {
     segments: readonly TranslateSegment[],
     options: TranslateOptions,
   ): AsyncGenerator<TranslationChunk> {
+    if (options.signal.aborted) return;
+    const direct = await this.resolveDirectLocalServer();
+    if (options.signal.aborted) return;
+    if (direct) {
+      this.closePortForDirect();
+      yield* this.directFor(direct).translate(segments, options);
+      return;
+    }
+    this.clearIdleClose();
     const requestId = createRequestId();
     const stream = new ChunkStream<TranslationChunk>();
     this.streams.set(requestId, stream);
@@ -378,34 +461,40 @@ export class EngineClient {
       options.signal.removeEventListener('abort', cancel);
       this.streams.delete(requestId);
       this.sendRaw({ type: 'cancel', requestId });
+      this.scheduleIdleClose();
     }
   }
 
   private async request<T>(message: RequestWithoutId, options: RequestOptions = {}): Promise<T> {
+    this.clearIdleClose();
     const attempts = options.retry === false ? 1 : 2;
     let lastError: unknown;
 
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      const requestId = createRequestId();
+    try {
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        const requestId = createRequestId();
 
-      try {
-        const port = await this.connect();
-        return (await this.roundTrip(
-          port,
-          { ...message, requestId } as EngineHostRequest,
-          options.timeoutMs ?? 10_000,
-        )) as T;
-      } catch (error) {
-        lastError = error;
-        if (!isHostGone(error)) throw error;
+        try {
+          const port = await this.connect();
+          return (await this.roundTrip(
+            port,
+            { ...message, requestId } as EngineHostRequest,
+            options.timeoutMs ?? 10_000,
+          )) as T;
+        } catch (error) {
+          lastError = error;
+          if (!isHostGone(error)) throw error;
 
-        this.dropPort();
-        if (attempt + 1 >= attempts) throw error;
-        if (options.recover !== false) await this.controller.recreate();
+          this.dropPort();
+          if (attempt + 1 >= attempts) throw error;
+          if (options.recover !== false) await this.controller.recreate();
+        }
       }
-    }
 
-    throw lastError instanceof Error ? lastError : hostError('The translation host failed.');
+      throw lastError instanceof Error ? lastError : hostError('The translation host failed.');
+    } finally {
+      this.scheduleIdleClose();
+    }
   }
 
   private connect(): Promise<Browser.runtime.Port> {
@@ -470,11 +559,16 @@ export class EngineClient {
   }
 
   private async pushSource(port: Browser.runtime.Port, settings: Settings): Promise<void> {
+    this.lastEngineSource = settings.engineSource;
     const payload = sourceSetPayload(settings);
     const key = sourceKeyOf(payload);
-    if (key === this.sourceKey && this.port === port) return;
+    if (key === this.sourceKey && this.port === port) {
+      this.scheduleIdleClose();
+      return;
+    }
     await this.roundTrip(port, { ...payload, requestId: createRequestId() }, 2_000);
     this.sourceKey = key;
+    this.scheduleIdleClose();
   }
 
   private async pushRuntime(port: Browser.runtime.Port, settings: Settings): Promise<void> {
@@ -607,12 +701,14 @@ export class EngineClient {
   }
 
   private handleDisconnect(): void {
+    this.clearIdleClose();
     this.port = null;
     this.clearPushedSettings();
     this.failAll(hostError('The translation host was closed.'));
   }
 
   private dropPort(): void {
+    this.clearIdleClose();
     const port = this.port;
     this.port = null;
     this.clearPushedSettings();
@@ -621,6 +717,29 @@ export class EngineClient {
     } catch {
       // Already disconnected.
     }
+  }
+
+  private clearIdleClose(): void {
+    if (!this.idleCloseTimer) return;
+    clearTimeout(this.idleCloseTimer);
+    this.idleCloseTimer = null;
+  }
+
+  private scheduleIdleClose(): void {
+    this.clearIdleClose();
+    if (this.localServerIdleCloseMs <= 0) return;
+    if (this.lastEngineSource !== 'local-server') return;
+    if (!this.port || this.connecting) return;
+    if (this.pending.size > 0 || this.streams.size > 0 || this.progress.size > 0) return;
+
+    this.idleCloseTimer = setTimeout(() => {
+      this.idleCloseTimer = null;
+      if (this.lastEngineSource !== 'local-server') return;
+      if (!this.port || this.connecting) return;
+      if (this.pending.size > 0 || this.streams.size > 0 || this.progress.size > 0) return;
+      this.dropPort();
+      void this.controller.close();
+    }, this.localServerIdleCloseMs);
   }
 
   private clearPushedSettings(): void {

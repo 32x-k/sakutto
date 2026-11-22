@@ -38,6 +38,27 @@ function controller(): OffscreenController {
 }
 
 describe('EngineClient', () => {
+  it('serves Firefox local-server status and warm requests without opening offscreen', async () => {
+    const settings = upgradedLocalServerSettings();
+    loadSettingsMock.mockResolvedValue(settings);
+    const offscreen = controller();
+    const client = new EngineClient(offscreen, { directLocalServer: true });
+    try {
+      expect(await client.status()).toMatchObject({
+        engineSource: 'local-server',
+        backend: 'local-server',
+        threads: 1,
+        parallel: settings.localServerParallel,
+      });
+      expect((await client.warmModel()).id).toBe(HIGH_QUALITY_MODEL_ID);
+      expect(offscreen.ensure).not.toHaveBeenCalled();
+      expect(connect).not.toHaveBeenCalled();
+    } finally {
+      loadSettingsMock.mockReset();
+      loadSettingsMock.mockRejectedValue(new Error('no settings'));
+    }
+  });
+
   it('settles an attach-only request on abort and ignores its late response', async () => {
     const port = new FakePort();
     connect.mockReturnValue(port.port);
@@ -415,7 +436,78 @@ describe('EngineClient', () => {
       model: { id: HIGH_QUALITY_MODEL_ID },
     });
   });
+
+  it('closes an idle local-server engine host so the background event page can suspend', async () => {
+    vi.useFakeTimers();
+    loadSettingsMock.mockResolvedValue(upgradedLocalServerSettings());
+    try {
+      const port = new FakePort();
+      connect.mockReturnValue(port.port);
+      const offscreen = controller();
+      const client = new EngineClient(offscreen, { localServerIdleCloseMs: 1_000 });
+
+      const pending = client.setSource(upgradedLocalServerSettings());
+      const source = await waitForMessageMicrotask<{ requestId: string }>(port, 'source-set');
+      port.emit({ type: 'response', requestId: source.requestId, ok: true, value: null });
+      const runtime = await waitForMessageMicrotask<{ requestId: string }>(port, 'runtime-set');
+      port.emit({ type: 'response', requestId: runtime.requestId, ok: true, value: null });
+      const model = await waitForMessageMicrotask<{ requestId: string }>(port, 'model-set');
+      port.emit({ type: 'response', requestId: model.requestId, ok: true, value: null });
+      await pending;
+
+      expect(offscreen.close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(999);
+      expect(offscreen.close).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(offscreen.close).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+      loadSettingsMock.mockReset();
+      loadSettingsMock.mockRejectedValue(new Error('no settings'));
+    }
+  });
+
+  it('does not close the engine host while in-browser mode is active', async () => {
+    vi.useFakeTimers();
+    const inBrowserSettings = normalizeSettings(
+      { schemaVersion: SETTINGS_SCHEMA_VERSION, targetLanguage: 'ja', engineSource: 'in-browser' },
+      'ja',
+    );
+    loadSettingsMock.mockResolvedValue(inBrowserSettings);
+    try {
+      const port = new FakePort();
+      connect.mockReturnValue(port.port);
+      const offscreen = controller();
+      const client = new EngineClient(offscreen, { localServerIdleCloseMs: 1_000 });
+
+      const pending = client.setSource(inBrowserSettings);
+      const source = await waitForMessageMicrotask<{ requestId: string }>(port, 'source-set');
+      port.emit({ type: 'response', requestId: source.requestId, ok: true, value: null });
+      const runtime = await waitForMessageMicrotask<{ requestId: string }>(port, 'runtime-set');
+      port.emit({ type: 'response', requestId: runtime.requestId, ok: true, value: null });
+      const model = await waitForMessageMicrotask<{ requestId: string }>(port, 'model-set');
+      port.emit({ type: 'response', requestId: model.requestId, ok: true, value: null });
+      await pending;
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(offscreen.close).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+      loadSettingsMock.mockReset();
+      loadSettingsMock.mockRejectedValue(new Error('no settings'));
+    }
+  });
 });
+
+async function waitForMessageMicrotask<T>(port: FakePort, type: string): Promise<T> {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const message = port.messagesOfType(type)[0];
+    if (message) return message as T;
+    await Promise.resolve();
+  }
+  throw new Error(`Timed out waiting for a ${type} host message.`);
+}
 
 function upgradedLocalServerSettings() {
   return normalizeSettings(

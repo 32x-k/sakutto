@@ -181,8 +181,17 @@ export default defineBackground(() => {
     void syncAllSitesContentScripts();
   });
 
-  async function syncSource(): Promise<void> {
+  /**
+   * Avoid spawning a cold offscreen/iframe host at browser startup when using a local
+   * server or before onboarding consent. `EngineClient.connect()` pushes stored settings
+   * automatically on the first actual translation or status request.
+   */
+  async function syncStartupSource(): Promise<void> {
     const settings = await ensureSettings();
+    if (settings.engineSource === 'local-server' || !hasLicenseConsent(settings)) {
+      client.syncStoredSettings(settings);
+      return;
+    }
     await client.setSource(settings);
   }
 
@@ -251,6 +260,7 @@ export default defineBackground(() => {
   }
 
   async function recordCommandAssignments(restoreEmpty = false): Promise<void> {
+    if (isAndroidPlatform()) return;
     const commands = (await browser.commands?.getAll?.().catch(() => [])) ?? [];
     const next = restoreEmpty ? await restoreEmptyCommandShortcuts(commands) : commands;
     await resolveShortcutQuery(next);
@@ -259,7 +269,7 @@ export default defineBackground(() => {
   browser.runtime.onInstalled.addListener(({ reason }) => {
     void (async () => {
       if (reason === 'update') await client.bootSource();
-      else await syncSource();
+      else await syncStartupSource();
       await recordCommandAssignments(reason === 'install' || reason === 'update');
       await syncMailContentScripts();
       await syncAllSitesContentScripts();
@@ -284,7 +294,7 @@ export default defineBackground(() => {
     if (warmStarted) return;
     warmStarted = true;
     const settings = await ensureSettings();
-    if (!hasLicenseConsent(settings)) return;
+    if (settings.engineSource === 'local-server' || !hasLicenseConsent(settings)) return;
     const status = await client
       .modelStatus(normalizeSelectedModelId(settings.selectedModelId))
       .catch(() => null);
@@ -293,12 +303,12 @@ export default defineBackground(() => {
     if (warmed) await broadcast({ type: 'model:progress', status: warmed });
   }
 
-  void syncSource()
+  void syncStartupSource()
     .then(() => warmStoredModel())
     .catch(() => undefined);
   void recordCommandAssignments().catch(() => undefined);
   browser.runtime.onStartup.addListener(() => {
-    void syncSource()
+    void syncStartupSource()
       .then(() => warmStoredModel())
       .catch(() => undefined);
     void recordCommandAssignments().catch(() => undefined);

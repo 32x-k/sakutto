@@ -1,30 +1,30 @@
-## このフォークの変更内容 (FastFlowLM / ローカルサーバー・モバイル向け改修)
+## Fork Changes (FastFlowLM / Local Server & Mobile Enhancements)
 
-オリジナル版（`jammaru/sakutto`）に対し、FastFlowLM NPU サーバー連携およびモバイル（Firefox for Android 等）での利用に最適化した以下の改修を加えています。
+This fork extends the upstream `jammaru/sakutto` with enhancements tailored for local FastFlowLM NPU servers and mobile browsers (such as Firefox for Android):
 
-### 1. ローカルサーバー（FastFlowLM NPU）専用化と内蔵エンジンのUI撤廃
+### 1. Local Server (FastFlowLM NPU) First & Built-in Engine UI Removal
 
-- **ローカルサーバーを既定化**: 初回セットアップ（オンボーディング）・設定画面ともに `local-server`（OpenAI 互換 `/v1/completions`）を既定とし、内蔵エンジン（wllama / WebGPU / CPU）および約 940MB〜1.5GB の GGUF モデルダウンロード導線を UI から撤廃しました。
-- **FastFlowLM NPU プリセット対応**: PLaMo-3 Translate（`plamo3-translate:0.8b` / `2b` / `8b`）のワンタップ選択とリモート（LAN / Tailscale 経由）接続に対応しています。
-- **接続テストのライブ応答状況表示**: 設定画面および FAB メニューでの接続テスト・モデル切替時に、進行ステージ（`/v1/models` 確認 → モデル切替・準備中 → 初回トークン・合計応答時間）とテスト翻訳結果（`"Hi." → "こんにちは。"`）をリアルタイムに表示します（プローブ時のタイムアウトは `8B` モデルのロードを考慮し最低 120 秒を確保）。
+- **Local server by default**: Both onboarding and Settings default to `local-server` (OpenAI-compatible `/v1/completions`), removing the built-in wllama/WebGPU/CPU engine controls and the ~940 MB–1.5 GB GGUF model download prompts from the UI.
+- **FastFlowLM NPU preset**: One-tap selection for PLaMo-3 Translate models (`plamo3-translate:0.8b` / `2b` / `8b`) with support for LAN and Tailscale remote endpoints.
+- **Live connection-test response status**: Both Settings and the FAB menu display real-time progress during connection tests and model switches (`/v1/models` check → model switch/warmup → TTFT & total latency) along with the live probe translation (`"Hi." → "こんにちは。"`), with a minimum 120-second probe timeout to accommodate 8B model loading.
 
-### 2. FAB（右下フローティングメニュー）の機能拡張
+### 2. Floating Action Button (FAB) Enhancements
 
-- **モデルワンタップ切替（`0.8B` / `2B` / `8B`）**: ページ上の FAB シート内から直接 PLaMo-3 モデルを切り替え、ライブ応答状況を確認したうえで翻訳中ページを自動的に新モデルで再翻訳します。
-- **再翻訳（キャッシュ更新）ボタン**: 翻訳中ページの FAB シートに「再翻訳（キャッシュ更新）」ボタンを追加し、既存キャッシュをバイパスして最新モデルの翻訳結果でキャッシュを上書き更新できるようにしました。
+- **One-tap model switcher (`0.8B` / `2B` / `8B`)**: Switch PLaMo-3 models directly from the on-page FAB sheet, view live probe status inline, and automatically retranslate active pages with the newly selected model.
+- **Retranslate (refresh cache) button**: Added a "Retranslate (refresh cache)" action to the FAB sheet on active pages to bypass cached entries and overwrite them with fresh translations.
 
-### 3. ページ翻訳の自動追従・レイアウト保護・モバイル表示改善
+### 3. Dynamic Page Translation, Layout Protection & Mobile UX
 
-- **アコーディオン・タブ展開時の自動翻訳**: `<details open>`、`aria-expanded="true"`、`data-state="open"`、`hidden` 解除などを `MutationObserver` で検知し、FAQ や折りたたみ要素を開いた際に未翻訳部分を自動で翻訳します。
-- **日本語翻訳後の大見出し縦崩れ（1文字折り返し）防止**: Flex 横並び内の大きな見出し（`24px` 以上）が日本語化で行数増加した際、自動的にフォントサイズを縮小調整して 1 文字ずつの縦並び崩れを防ぎます（原文復元時は元のスタイルへ完全復帰）。
-- **上部バーのキャッシュ・速度表示とモバイル最適化**: ページ上部バーに翻訳速度（`tok/s`・`区間/s`）とキャッシュヒット数（`キャッシュ X/Y`）を並べて表示し、モバイル画面幅でも「原文に戻す」ボタンがはみ出さないよう調整しました。
-- **アプリ切り替え時のバックグラウンド推論継続**: モバイルで別アプリへ切り替えて画面が非表示になった際も、ローカルサーバーで実行中の推論リクエストを中断せずそのまま完了まで維持します。
-- **スクロール先読み範囲の拡大**: ローカルサーバー利用時の先読み範囲を `2 画面分 → 3.5 画面分`（高速モード時は `4.5 画面分`）に拡大し、スクロール時の未翻訳待ちを軽減しました。
-- **日本語 UI 表記の改善**: 不自然だった「訳先」「訳先の言語」表記を「翻訳先」「翻訳先の言語」に統一しました。
+- **Auto-translation for opened accordions and tabs**: Observes `<details open>`, `aria-expanded="true"`, `data-state="open"`, and unhidden elements via `MutationObserver` to automatically translate newly revealed FAQ and collapsible content.
+- **CJK heading vertical-wrap prevention**: Automatically scales down large headings (`>= 24px`) inside horizontal flex rows if CJK translation causes line-count expansion, preventing single-character vertical stacking (and restores the exact original style on restore).
+- **Top bar speed + cache hit display & mobile fit**: Shows live throughput (`tok/s`, `segments/s`) alongside cache hit counts (`Cache X/Y`) in the top bar, adjusted so the "Restore original" button stays within mobile viewport widths.
+- **Background inference continuity across app switches**: Keeps in-flight local-server translation requests running instead of aborting when switching apps on mobile.
+- **Wider scroll look-ahead**: Increased `local-server` look-ahead from `2` to `3.5` screens (`4.5` screens in fast mode) to reduce waiting while scrolling.
+- **Japanese UI label polish**: Unified unnatural `"訳先"` / `"訳先の言語"` labels to `"翻訳先"` / `"翻訳先の言語"`.
 
-### 4. Firefox for Android 向け軽量 `.xpi` ビルド（0.68 MiB）
+### 4. Lightweight Firefox for Android `.xpi` Build (0.68 MiB)
 
-- `pnpm build:firefox-android` にて、モバイルで不要な `vendor/wllama`（約 26MB）に加えて `vendor/pdfjs` と `reader.html` を除外し、パッケージサイズを **2.68 MiB → 0.68 MiB** に軽量化しました。
+- `pnpm build:firefox-android` strips unused mobile assets (`vendor/wllama`, `vendor/pdfjs`, and `reader.html`), reducing the package size from **2.68 MiB to 0.68 MiB**.
 
 ---
 

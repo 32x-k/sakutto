@@ -12,11 +12,13 @@ import type {
   FloatingButtonSide,
 } from '@/shared/settings';
 import { displayTargetLanguage } from '@/ui/language-label';
+import { applyFabTheme, samplePageTheme } from './page-theme';
 import type { SiteAuto } from './sites';
 
 export const FLOATING_MENU_TAG = 'sakutto-fab';
 const DEFAULT_POSITION: FloatingButtonPosition = { side: 'right', y: 74 };
 const DRAG_THRESHOLD_PX = 8;
+const SWIPE_HIDE_THRESHOLD_PX = 44;
 
 export interface FloatingMenuEnv {
   readonly navigator?: PlatformNavigator | undefined;
@@ -63,6 +65,7 @@ export interface FloatingMenuLabels {
   close: string;
   pageTranslated: string;
   pageProgress: (done: number, total: number) => string;
+  serverError?: string;
 }
 
 export interface FloatingMenuState {
@@ -73,6 +76,7 @@ export interface FloatingMenuState {
   total: number;
   auto: SiteAuto;
   targetLanguage: TargetLanguage;
+  serverFault?: boolean;
 }
 
 export interface FloatingMenuPreferences {
@@ -105,31 +109,25 @@ const FAB_STYLE = `
   z-index: 2147483645;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif;
   color-scheme: light dark;
-  --bg: rgba(255, 255, 255, 0.96);
-  --surface: #f4f7f8;
+  --bg: rgba(255, 255, 255, 0.92);
+  --fab-bg: rgba(255, 255, 255, 0.60);
+  --fab-bg-hover: rgba(255, 255, 255, 0.92);
+  --surface: rgba(244, 247, 248, 0.90);
   --text: #0f172a;
-  --muted: #526071;
-  --border: rgba(15, 23, 42, 0.14);
+  --muted: rgba(15, 23, 42, 0.68);
+  --border: rgba(15, 23, 42, 0.13);
   --accent: #0f766e;
+  --fab-accent-bg: rgba(15, 118, 110, 0.76);
+  --fab-accent-bg-hover: rgba(15, 118, 110, 0.94);
   --accent-strong: #115e59;
   --accent-contrast: #ffffff;
-  --shadow: 0 8px 24px rgba(15, 23, 42, 0.22);
-}
-@media (prefers-color-scheme: dark) {
-  :host {
-    --bg: rgba(22, 27, 34, 0.96);
-    --surface: #212832;
-    --text: #f1f5f9;
-    --muted: #94a3b8;
-    --border: rgba(241, 245, 249, 0.16);
-    --accent: #14b8a6;
-    --accent-strong: #2dd4bf;
-    --accent-contrast: #042f2e;
-    --shadow: 0 8px 26px rgba(0, 0, 0, 0.48);
-  }
+  --fab-shadow: 0 4px 14px rgba(15, 23, 42, 0.11);
+  --shadow: 0 10px 26px rgba(15, 23, 42, 0.18);
 }
 * { box-sizing: border-box; }
 .fab-btn {
+  position: relative;
+  overflow: visible;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -139,9 +137,12 @@ const FAB_STYLE = `
   padding: 0 10px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--fab-bg);
   color: var(--accent);
-  box-shadow: var(--shadow);
+  box-shadow: var(--fab-shadow);
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  opacity: 0.74;
   cursor: pointer;
   touch-action: none;
   user-select: none;
@@ -149,15 +150,70 @@ const FAB_STYLE = `
   -webkit-tap-highlight-color: transparent;
   font-size: 12px;
   font-weight: 700;
-  transition: transform 0.12s ease, background 0.15s ease, color 0.15s ease;
+  transition: transform 0.14s ease, opacity 0.18s ease, background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+.fab-btn[data-progressing="1"]::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  padding: 2.5px;
+  background: conic-gradient(
+    var(--accent) var(--fab-progress, 0%),
+    rgba(127, 127, 127, 0.22) 0
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+.fab-btn[data-active="1"][data-progressing="1"]::before {
+  background: conic-gradient(
+    var(--accent-contrast) var(--fab-progress, 0%),
+    rgba(255, 255, 255, 0.24) 0
+  );
+}
+.status-dot {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  border: 1.5px solid var(--bg);
+  background: var(--accent);
+  pointer-events: none;
+}
+.status-dot[data-kind="fault"] {
+  background: #f59e0b;
+}
+.status-dot[hidden] {
+  display: none;
+}
+.fab-btn:hover,
+.fab-btn:focus-visible,
+.fab-btn[aria-expanded="true"],
+.fab-btn[data-dragging="1"] {
+  opacity: 1;
+  background: var(--fab-bg-hover);
+  box-shadow: var(--shadow);
 }
 .fab-btn:active {
   transform: scale(0.95);
 }
 .fab-btn[data-active="1"] {
-  background: var(--accent);
+  background: var(--fab-accent-bg);
   color: var(--accent-contrast);
   border-color: transparent;
+  opacity: 0.84;
+}
+.fab-btn[data-active="1"]:hover,
+.fab-btn[data-active="1"]:focus-visible,
+.fab-btn[data-active="1"][aria-expanded="true"],
+.fab-btn[data-active="1"][data-dragging="1"] {
+  background: var(--fab-accent-bg-hover);
+  opacity: 1;
 }
 .fab-btn svg {
   width: 20px;
@@ -177,6 +233,8 @@ const FAB_STYLE = `
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
   box-shadow: var(--shadow);
   display: grid;
   gap: 10px;
@@ -230,6 +288,34 @@ const FAB_STYLE = `
 }
 .status[hidden] {
   display: none;
+}
+.fault-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.fault-banner[hidden] {
+  display: none;
+}
+.fault-banner button {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 7px;
+  padding: 4px 8px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
 }
 .row {
   display: grid;
@@ -318,11 +404,15 @@ export class FloatingMenuController {
   private host: HTMLElement | null = null;
   private fabButton: HTMLButtonElement | null = null;
   private badgeEl: HTMLSpanElement | null = null;
+  private statusDotEl: HTMLSpanElement | null = null;
   private sheetEl: HTMLDivElement | null = null;
   private titleEl: HTMLSpanElement | null = null;
   private closeBtn: HTMLButtonElement | null = null;
   private primaryBtn: HTMLButtonElement | null = null;
   private statusEl: HTMLParagraphElement | null = null;
+  private faultBannerEl: HTMLDivElement | null = null;
+  private faultTextEl: HTMLSpanElement | null = null;
+  private faultOptionsBtn: HTMLButtonElement | null = null;
   private displayBtn: HTMLButtonElement | null = null;
   private typedBtn: HTMLButtonElement | null = null;
   private targetLabelEl: HTMLSpanElement | null = null;
@@ -342,7 +432,9 @@ export class FloatingMenuController {
   private dragStartX = 0;
   private dragStartY = 0;
   private dragOffsetY = 0;
+  private dragStartSide: FloatingButtonSide = 'right';
   private dragged = false;
+  private swipeDismissed = false;
 
   constructor(
     doc: Document,
@@ -371,6 +463,7 @@ export class FloatingMenuController {
     this.prefs = preferences;
     if (preferences.position) this.position = preferences.position;
     this.syncMount();
+    this.applyTheme();
     this.applyPosition();
     this.render();
   }
@@ -419,6 +512,13 @@ export class FloatingMenuController {
     badge.hidden = true;
     fab.appendChild(badge);
 
+    const statusDot = this.doc.createElement('span');
+    statusDot.className = 'status-dot';
+    statusDot.setAttribute('data-sakutto-fab', 'status-dot');
+    statusDot.setAttribute('aria-hidden', 'true');
+    statusDot.hidden = true;
+    fab.appendChild(statusDot);
+
     const sheet = this.doc.createElement('div');
     sheet.className = 'sheet';
     sheet.setAttribute('role', 'dialog');
@@ -450,6 +550,21 @@ export class FloatingMenuController {
     const statusEl = this.doc.createElement('p');
     statusEl.className = 'status';
     statusEl.hidden = true;
+
+    const faultBanner = this.doc.createElement('div');
+    faultBanner.className = 'fault-banner';
+    faultBanner.setAttribute('role', 'alert');
+    faultBanner.setAttribute('data-sakutto-fab', 'fault-banner');
+    faultBanner.hidden = true;
+    const faultText = this.doc.createElement('span');
+    const faultOptionsBtn = this.doc.createElement('button');
+    faultOptionsBtn.type = 'button';
+    faultOptionsBtn.setAttribute('data-sakutto-fab', 'fault-options');
+    faultOptionsBtn.addEventListener('click', () => {
+      this.setOpen(false);
+      this.callbacks.onOpenOptions();
+    });
+    faultBanner.append(faultText, faultOptionsBtn);
 
     const row = this.doc.createElement('div');
     row.className = 'row';
@@ -515,7 +630,7 @@ export class FloatingMenuController {
     });
     footer.append(optionsBtn, hideBtn);
 
-    sheet.append(header, primaryBtn, statusEl, row, targetField, alwaysLabel, footer);
+    sheet.append(header, primaryBtn, statusEl, faultBanner, row, targetField, alwaysLabel, footer);
     shadow.append(fab, sheet);
 
     fab.addEventListener('pointerdown', this.onPointerDown);
@@ -533,11 +648,15 @@ export class FloatingMenuController {
     this.host = host;
     this.fabButton = fab;
     this.badgeEl = badge;
+    this.statusDotEl = statusDot;
     this.sheetEl = sheet;
     this.titleEl = title;
     this.closeBtn = closeBtn;
     this.primaryBtn = primaryBtn;
     this.statusEl = statusEl;
+    this.faultBannerEl = faultBanner;
+    this.faultTextEl = faultText;
+    this.faultOptionsBtn = faultOptionsBtn;
     this.displayBtn = displayBtn;
     this.typedBtn = typedBtn;
     this.targetLabelEl = targetLabel;
@@ -547,8 +666,14 @@ export class FloatingMenuController {
     this.optionsBtn = optionsBtn;
     this.hideBtn = hideBtn;
 
+    this.applyTheme();
     this.applyPosition();
     this.render();
+  }
+
+  private applyTheme(): void {
+    if (!this.host) return;
+    applyFabTheme(this.host, samplePageTheme(this.doc));
   }
 
   private unmount(): void {
@@ -560,11 +685,15 @@ export class FloatingMenuController {
     this.host = null;
     this.fabButton = null;
     this.badgeEl = null;
+    this.statusDotEl = null;
     this.sheetEl = null;
     this.titleEl = null;
     this.closeBtn = null;
     this.primaryBtn = null;
     this.statusEl = null;
+    this.faultBannerEl = null;
+    this.faultTextEl = null;
+    this.faultOptionsBtn = null;
     this.displayBtn = null;
     this.typedBtn = null;
     this.targetLabelEl = null;
@@ -607,6 +736,7 @@ export class FloatingMenuController {
     if (this.sheetEl) this.sheetEl.hidden = !next;
     this.fabButton?.setAttribute('aria-expanded', next ? 'true' : 'false');
     if (next) {
+      this.applyTheme();
       const state = this.callbacks.readState();
       this.render(state);
       this.positionSheet();
@@ -674,15 +804,38 @@ export class FloatingMenuController {
   private render(state: FloatingMenuState = this.callbacks.readState()): void {
     if (!this.host || !this.fabButton) return;
 
+    const progressing = state.active && state.pending > 0 && state.total > 0;
+    const fault = state.serverFault === true;
+
     this.fabButton.setAttribute('aria-label', this.labels.brand);
     this.fabButton.setAttribute('data-active', state.active ? '1' : '0');
+    this.fabButton.setAttribute('data-progressing', progressing ? '1' : '0');
+    if (progressing) {
+      const pct = Math.max(4, Math.min(100, Math.round((state.done / state.total) * 100)));
+      this.fabButton.style.setProperty('--fab-progress', `${pct}%`);
+    } else {
+      this.fabButton.style.removeProperty('--fab-progress');
+    }
 
     if (this.badgeEl) {
-      if (state.active && state.pending > 0 && state.total > 0) {
+      if (progressing) {
         this.badgeEl.textContent = `${state.done}/${state.total}`;
         this.badgeEl.hidden = false;
       } else {
         this.badgeEl.hidden = true;
+      }
+    }
+
+    if (this.statusDotEl) {
+      if (fault) {
+        this.statusDotEl.setAttribute('data-kind', 'fault');
+        this.statusDotEl.hidden = false;
+      } else if (state.auto === 'always') {
+        this.statusDotEl.setAttribute('data-kind', 'auto');
+        this.statusDotEl.hidden = false;
+      } else {
+        this.statusDotEl.removeAttribute('data-kind');
+        this.statusDotEl.hidden = true;
       }
     }
 
@@ -695,14 +848,24 @@ export class FloatingMenuController {
     }
 
     if (this.statusEl) {
-      if (state.active && state.pending > 0 && state.total > 0) {
+      if (progressing) {
         this.statusEl.textContent = this.labels.pageProgress(state.done, state.total);
         this.statusEl.hidden = false;
-      } else if (state.active && state.pending === 0) {
+      } else if (state.active && state.pending === 0 && !fault) {
         this.statusEl.textContent = this.labels.pageTranslated;
         this.statusEl.hidden = false;
       } else {
         this.statusEl.hidden = true;
+      }
+    }
+
+    if (this.faultBannerEl && this.faultTextEl && this.faultOptionsBtn) {
+      if (fault && this.labels.serverError) {
+        this.faultTextEl.textContent = this.labels.serverError;
+        this.faultOptionsBtn.textContent = this.labels.openOptions;
+        this.faultBannerEl.hidden = false;
+      } else {
+        this.faultBannerEl.hidden = true;
       }
     }
 
@@ -758,7 +921,9 @@ export class FloatingMenuController {
     const view = this.doc.defaultView;
     const vh = view?.innerHeight ?? 800;
     this.dragOffsetY = (this.position.y / 100) * vh - event.clientY;
+    this.dragStartSide = this.position.side;
     this.dragged = false;
+    this.swipeDismissed = false;
     try {
       this.fabButton?.setPointerCapture(event.pointerId);
     } catch {
@@ -772,7 +937,25 @@ export class FloatingMenuController {
     const dy = event.clientY - this.dragStartY;
     if (!this.dragged && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
     this.dragged = true;
+    this.fabButton?.setAttribute('data-dragging', '1');
     if (this.open) this.setOpen(false);
+
+    const outwardDx = this.dragStartSide === 'right' ? dx : -dx;
+    if (outwardDx >= 12 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+      const shift = Math.min(56, outwardDx);
+      this.host.style.transform = `translateX(${Math.round(
+        this.dragStartSide === 'right' ? shift : -shift,
+      )}px)`;
+      if (this.fabButton) {
+        this.fabButton.style.opacity = String(Math.max(0.2, 1 - outwardDx / 68));
+      }
+      this.swipeDismissed = outwardDx >= SWIPE_HIDE_THRESHOLD_PX;
+      return;
+    }
+
+    this.swipeDismissed = false;
+    this.host.style.transform = '';
+    if (this.fabButton) this.fabButton.style.opacity = '';
     const view = this.doc.defaultView;
     const vw = view?.innerWidth ?? 390;
     const vh = view?.innerHeight ?? 800;
@@ -787,11 +970,22 @@ export class FloatingMenuController {
   private readonly onPointerUp = (event: PointerEvent): void => {
     if (this.dragPointerId !== event.pointerId) return;
     this.dragPointerId = null;
+    this.fabButton?.removeAttribute('data-dragging');
+    if (this.fabButton) this.fabButton.style.opacity = '';
     try {
       this.fabButton?.releasePointerCapture(event.pointerId);
     } catch {
       // Ignore if capture was not set.
     }
+    if (this.swipeDismissed) {
+      this.swipeDismissed = false;
+      this.dragged = false;
+      this.hiddenForTab = true;
+      this.setOpen(false);
+      this.unmount();
+      return;
+    }
+    if (this.host) this.host.style.transform = '';
     if (this.dragged) {
       this.callbacks.onPositionChange(this.position);
     }
@@ -800,6 +994,10 @@ export class FloatingMenuController {
   private readonly onPointerCancel = (event: PointerEvent): void => {
     if (this.dragPointerId !== event.pointerId) return;
     this.dragPointerId = null;
+    this.swipeDismissed = false;
+    this.fabButton?.removeAttribute('data-dragging');
+    if (this.fabButton) this.fabButton.style.opacity = '';
+    if (this.host) this.host.style.transform = '';
   };
 
   private readonly onDocPointerDown = (event: PointerEvent): void => {

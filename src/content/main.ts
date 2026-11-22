@@ -5,12 +5,7 @@ import { shouldHandleComposeCommand } from '@/dom/compose-field';
 import { detectDocumentLanguage } from '@/dom/detect';
 import { fakeTranslate } from '@/dom/fake-engine';
 import { FloatingMenuController, type FloatingMenuLabels } from '@/dom/floating-menu';
-import { GmailBannerController, isGmailHost, type GmailBannerLabels } from '@/dom/gmail-banner';
-import {
-  OutlookBannerController,
-  isOutlookHost,
-  type OutlookBannerLabels,
-} from '@/dom/outlook-banner';
+import { isMailHost } from '@/dom/mail-sites';
 import type { OverlayLabels } from '@/dom/overlay';
 import {
   PageSession,
@@ -18,9 +13,7 @@ import {
   preferencesFor,
   type PageSelectionSnapshot,
 } from '@/dom/session';
-import { VideoCaptionSession, type CaptionSessionPreferences } from '@/captions/session';
-import type { CaptionOverlayLabels } from '@/captions/overlay';
-import { captionsAllowedOnPage, videoCaptionPositionSite } from '@/captions/sites';
+import { captionsAllowedOnPage } from '@/captions/sites';
 import {
   loadSiteRule,
   pageHost,
@@ -40,13 +33,7 @@ import { sharedFolderNeedsUserAction, type ModelStatus } from '@/shared/engine-s
 import { mergeGlossary } from '@/shared/glossary';
 import { readRuntimeLastError } from '@/shared/runtime-last-error';
 import { currentUiLanguage, t } from '@/shared/i18n';
-import {
-  displayLanguage,
-  effectivePageTarget,
-  isTargetLanguage,
-  type TargetLanguage,
-} from '@/shared/languages';
-import { displayTargetLanguage } from '@/ui/language-label';
+import { effectivePageTarget, isTargetLanguage, type TargetLanguage } from '@/shared/languages';
 import {
   boundShortcut,
   defaultShortcutEnabled,
@@ -67,6 +54,7 @@ import {
   isShortcutQueryResult,
   requestEngineStatus,
   requestEngineWarm,
+  type ContentFeatureName,
   type PageCommandName,
   type PageInfo,
   type ShortcutQueryResult,
@@ -74,7 +62,7 @@ import {
 } from '@/shared/messages';
 import { modelRemovalOutcome, modelRemovalStopsTranslation } from '@/shared/model-progress';
 import { loadSettings, saveSettings, subscribeSettings } from '@/shared/storage';
-import type { Settings, VideoCaptionPosition } from '@/shared/settings';
+import type { Settings } from '@/shared/settings';
 import { typedReadiness, type TypedReadiness } from '@/shared/typed-translation';
 import { translateViaBackground } from '@/shared/translation-client';
 import { installContentPortLifecycle } from '@/shared/content-port-lifecycle';
@@ -245,79 +233,6 @@ function composeReadiness(
   });
 }
 
-function captionLabels(): CaptionOverlayLabels {
-  return {
-    label: t('videoCaptionsLabel'),
-    pending: t('videoCaptionsPending'),
-    showOriginal: t('videoCaptionsShowOriginal'),
-    hideOriginal: t('videoCaptionsHideOriginal'),
-  };
-}
-
-function mailBannerLabels(): GmailBannerLabels | OutlookBannerLabels {
-  const uiLanguage = currentUiLanguage();
-  const sourceName = (language: string) => displayLanguage(language, uiLanguage);
-  return {
-    region: t('gmailBannerRegion'),
-    detected: (language) => t('gmailBannerDetected', [sourceName(language)]),
-    translate: (language) =>
-      t('gmailBannerTranslate', [displayTargetLanguage(language, uiLanguage)]),
-    showOriginal: t('gmailBannerShowOriginal'),
-    showTranslation: t('gmailBannerShowTranslation'),
-    translating: t('gmailBannerTranslating'),
-    error: t('gmailBannerFailed'),
-    close: t('close'),
-    translated: (source, target) =>
-      t('gmailBannerTranslated', [sourceName(source), displayTargetLanguage(target, uiLanguage)]),
-    menu: t('gmailBannerMenu'),
-    translateNow: (language) => t('gmailBannerTranslateNow', [sourceName(language)]),
-    alwaysTranslate: (language) => t('gmailBannerAlwaysTranslate', [sourceName(language)]),
-    neverTranslate: (language) => t('gmailBannerNeverTranslate', [sourceName(language)]),
-  };
-}
-
-function captionPreferencesFor(
-  settings: Settings,
-  rule: SiteRule,
-  host: string,
-): CaptionSessionPreferences {
-  const glossary = mergeGlossary(settings.glossary, rule.glossary);
-  const site = videoCaptionPositionSite(host);
-  return {
-    enabled:
-      settings.translateVideoCaptions &&
-      rule.auto !== 'never' &&
-      captionsAllowedOnPage(host, settings.captionCustomHosts, document),
-    targetLanguage: effectivePageTarget(settings.targetLanguage, rule.targetLanguage),
-    form: settings.form,
-    display: settings.videoCaptionDisplay,
-    size: settings.videoCaptionSize,
-    originalToggle: settings.videoCaptionOriginalToggle,
-    position: settings.videoCaptionPositions[site] ?? null,
-    glossary: glossary.length > 0 ? glossary : undefined,
-    customHosts: settings.captionCustomHosts,
-    tier: null,
-  };
-}
-
-function mailBannerPreferencesFor(
-  settings: Settings,
-  rule: SiteRule,
-  host: string,
-  provider: 'gmail' | 'outlook',
-) {
-  const glossary = mergeGlossary(settings.glossary, rule.glossary);
-  const onHost = provider === 'gmail' ? isGmailHost(host) : isOutlookHost(host);
-  return {
-    enabled: settings.gmailTranslateBanner && onHost && rule.auto !== 'always',
-    targetLanguage: effectivePageTarget(settings.targetLanguage, rule.targetLanguage),
-    form: settings.form,
-    autoLanguages: settings.gmailAutoTranslateLangs,
-    neverLanguages: settings.gmailNeverTranslateLangs,
-    ...(glossary.length > 0 ? { glossary } : {}),
-  };
-}
-
 function overlayLabels(): OverlayLabels {
   return {
     original: t('originalLabel'),
@@ -364,6 +279,7 @@ function floatingMenuLabels(): FloatingMenuLabels {
     close: t('close'),
     pageTranslated: t('pageTranslated'),
     pageProgress: (done, total) => t('pageProgress', [String(done), String(total)]),
+    serverError: t('localServerFailed'),
   };
 }
 
@@ -400,9 +316,6 @@ export function contentMain(): void {
   let lastCommand = '';
   let lastCommandAt = 0;
   let compose: ComposeController | null = null;
-  let captions: VideoCaptionSession | null = null;
-  let gmailBanner: GmailBannerController | null = null;
-  let outlookBanner: OutlookBannerController | null = null;
   let floatingMenu: FloatingMenuController | null = null;
   let invalidationToreDown = false;
   // The passive all-sites injection stays quiet on a host the reader turned off. The first
@@ -411,18 +324,26 @@ export function contentMain(): void {
   let selectionOffersSuppressed = false;
   let pendingExistingSelectionOffer = false;
   let languageDetected = false;
+  const requestedFeatures = new Set<ContentFeatureName>();
+  const ensureContentFeature = (feature: ContentFeatureName): void => {
+    if (requestedFeatures.has(feature) || invalidationToreDown) return;
+    requestedFeatures.add(feature);
+    void browser.runtime
+      .sendMessage({ type: 'content:load-feature', feature })
+      .then((loaded) => {
+        if (loaded !== true) requestedFeatures.delete(feature);
+      })
+      .catch(() => {
+        requestedFeatures.delete(feature);
+        readRuntimeLastError();
+      });
+  };
   const teardownAfterInvalidation = (): void => {
     if (invalidationToreDown) return;
     invalidationToreDown = true;
     compose?.destroy();
-    captions?.stop();
-    gmailBanner?.dispose();
-    outlookBanner?.dispose();
     floatingMenu?.dispose();
     compose = null;
-    captions = null;
-    gmailBanner = null;
-    outlookBanner = null;
     floatingMenu = null;
     unregisterLiveContentInstanceToken(instanceToken);
     removeOwnedMailBannerHosts(document, instanceToken);
@@ -498,11 +419,11 @@ export function contentMain(): void {
   const pageCommandBridge: {
     deliver: ((command: PageCommandName, source?: EventTarget | null) => void) | null;
     ensureCompose: ((nextSettings: Settings, nextRule: SiteRule) => ComposeController) | null;
-    syncCaptions: ((nextSettings: Settings, nextRule: SiteRule) => void) | null;
+    syncOptionalFeatures: ((nextSettings: Settings, nextRule: SiteRule) => void) | null;
   } = {
     deliver: null,
     ensureCompose: null,
-    syncCaptions: null,
+    syncOptionalFeatures: null,
   };
 
   const sessionPromise = (async () => {
@@ -699,115 +620,21 @@ export function contentMain(): void {
       }
     };
     syncSelectionSuppression();
-    let captionDisplayWrite = 0;
-    let captionPositionWrite = 0;
-    let mailLanguagesWrite = 0;
 
-    const persistCaptionPosition = (point: VideoCaptionPosition): void => {
-      captionPositionWrite += 1;
-      const site = videoCaptionPositionSite(host);
-      liveSettings = {
-        ...liveSettings,
-        videoCaptionPositions: { ...liveSettings.videoCaptionPositions, [site]: point },
-      };
-      captions?.setPreferences(captionPreferencesFor(liveSettings, liveRule, host));
-      void saveSettings({ videoCaptionPositions: liveSettings.videoCaptionPositions });
-    };
-
-    const syncCaptions = (targetSettings: Settings, targetRule: SiteRule): void => {
-      const captionPrefs = captionPreferencesFor(targetSettings, targetRule, host);
-      if (!captionPrefs.enabled) {
-        captions?.stop();
-        captions = null;
-        return;
+    const syncOptionalFeatures = (targetSettings: Settings, targetRule: SiteRule): void => {
+      if (
+        targetSettings.translateVideoCaptions &&
+        targetRule.auto !== 'never' &&
+        captionsAllowedOnPage(host, targetSettings.captionCustomHosts, document)
+      ) {
+        ensureContentFeature('captions');
       }
-      if (!captions) {
-        captions = new VideoCaptionSession(document, {
-          engine,
-          labels: captionLabels(),
-          preferences: captionPrefs,
-          onDisplayToggle: () => {
-            captionDisplayWrite += 1;
-            const nextDisplay =
-              liveSettings.videoCaptionDisplay === 'bilingual' ? 'replace' : 'bilingual';
-            liveSettings = { ...liveSettings, videoCaptionDisplay: nextDisplay };
-            captions?.setPreferences(captionPreferencesFor(liveSettings, liveRule, host));
-            void saveSettings({ videoCaptionDisplay: nextDisplay });
-          },
-          onPositionChange: persistCaptionPosition,
-        });
-        captions.start();
-        return;
-      }
-      captions.setLabels(captionLabels());
-      captions.setPreferences(captionPrefs);
-    };
-    pageCommandBridge.syncCaptions = syncCaptions;
-    syncCaptions(liveSettings, liveRule);
-
-    const onMailLanguagesChange = (languages: { auto: string[]; never: string[] }): void => {
-      mailLanguagesWrite += 1;
-      liveSettings = {
-        ...liveSettings,
-        gmailAutoTranslateLangs: languages.auto,
-        gmailNeverTranslateLangs: languages.never,
-      };
-      void saveSettings({
-        gmailAutoTranslateLangs: languages.auto,
-        gmailNeverTranslateLangs: languages.never,
-      });
-    };
-
-    const syncMailBanners = (targetSettings: Settings, targetRule: SiteRule): void => {
-      const gmailPrefs = mailBannerPreferencesFor(targetSettings, targetRule, host, 'gmail');
-      if (gmailPrefs.enabled) {
-        if (!gmailBanner) {
-          gmailBanner = new GmailBannerController(document, {
-            engine,
-            labels: mailBannerLabels(),
-            preferences: gmailPrefs,
-            onWarm: () => {
-              if (!__SAKUTTO_FAKE_ENGINE__ && liveSettings.engineSource !== 'local-server') {
-                void requestEngineWarm();
-              }
-            },
-            onLanguagesChange: onMailLanguagesChange,
-          });
-          gmailBanner.start();
-        } else {
-          gmailBanner.setLabels(mailBannerLabels());
-          gmailBanner.setPreferences(gmailPrefs);
-        }
-      } else if (gmailBanner) {
-        gmailBanner.dispose();
-        gmailBanner = null;
-      }
-
-      const outlookPrefs = mailBannerPreferencesFor(targetSettings, targetRule, host, 'outlook');
-      if (outlookPrefs.enabled) {
-        if (!outlookBanner) {
-          outlookBanner = new OutlookBannerController(document, {
-            engine,
-            labels: mailBannerLabels(),
-            preferences: outlookPrefs,
-            onWarm: () => {
-              if (!__SAKUTTO_FAKE_ENGINE__ && liveSettings.engineSource !== 'local-server') {
-                void requestEngineWarm();
-              }
-            },
-            onLanguagesChange: onMailLanguagesChange,
-          });
-          outlookBanner.start();
-        } else {
-          outlookBanner.setLabels(mailBannerLabels());
-          outlookBanner.setPreferences(outlookPrefs);
-        }
-      } else if (outlookBanner) {
-        outlookBanner.dispose();
-        outlookBanner = null;
+      if (targetSettings.gmailTranslateBanner && isMailHost(host) && targetRule.auto !== 'always') {
+        ensureContentFeature('mail');
       }
     };
-    syncMailBanners(liveSettings, liveRule);
+    pageCommandBridge.syncOptionalFeatures = syncOptionalFeatures;
+    syncOptionalFeatures(liveSettings, liveRule);
 
     floatingMenu = new FloatingMenuController(document, {
       labels: floatingMenuLabels(),
@@ -871,6 +698,7 @@ export function contentMain(): void {
             done: view.done,
             total: view.total,
             auto: liveRule.auto,
+            serverFault: view.serverFault === true,
             targetLanguage: effectivePageTarget(
               liveSettings.targetLanguage,
               liveRule.targetLanguage,
@@ -894,39 +722,16 @@ export function contentMain(): void {
     else session.offerExistingSelection();
 
     const applyStored = async (): Promise<void> => {
-      const writeId = captionDisplayWrite;
-      const positionWriteId = captionPositionWrite;
       const popupWidthId = popupWidthWrite;
-      const mailLanguagesId = mailLanguagesWrite;
       const previousEngineSource = engineSource;
       const [nextSettings, nextRule] = await Promise.all([loadSettings(), loadSiteRule(host)]);
-      const display =
-        writeId === captionDisplayWrite
-          ? nextSettings.videoCaptionDisplay
-          : liveSettings.videoCaptionDisplay;
-      const positions =
-        positionWriteId === captionPositionWrite
-          ? nextSettings.videoCaptionPositions
-          : liveSettings.videoCaptionPositions;
       const popupWidth =
         popupWidthId === popupWidthWrite
           ? nextSettings.translationPopupWidth
           : liveSettings.translationPopupWidth;
-      const gmailAutoTranslateLangs =
-        mailLanguagesId === mailLanguagesWrite
-          ? nextSettings.gmailAutoTranslateLangs
-          : liveSettings.gmailAutoTranslateLangs;
-      const gmailNeverTranslateLangs =
-        mailLanguagesId === mailLanguagesWrite
-          ? nextSettings.gmailNeverTranslateLangs
-          : liveSettings.gmailNeverTranslateLangs;
       liveSettings = {
         ...nextSettings,
         translationPopupWidth: popupWidth,
-        videoCaptionDisplay: display,
-        videoCaptionPositions: positions,
-        gmailAutoTranslateLangs,
-        gmailNeverTranslateLangs,
       };
       liveRule = nextRule;
       syncSelectionSuppression();
@@ -955,8 +760,7 @@ export function contentMain(): void {
         modelStatusKnown,
       );
       syncCompose(liveSettings, liveRule, readiness);
-      syncCaptions(liveSettings, liveRule);
-      syncMailBanners(liveSettings, liveRule);
+      syncOptionalFeatures(liveSettings, liveRule);
       floatingMenu?.setLabels(floatingMenuLabels());
       floatingMenu?.setPreferences({
         mode: liveSettings.floatingButton,
@@ -997,7 +801,7 @@ export function contentMain(): void {
     if (rule.auto === 'always') {
       if (!__SAKUTTO_FAKE_ENGINE__ && liveSettings.engineSource !== 'local-server') {
         void requestEngineWarm();
-        void requestEngineTier(session, false, captions);
+        void requestEngineTier(session, false);
       }
       void session.translate();
     }
@@ -1028,12 +832,12 @@ export function contentMain(): void {
     lastCommandAt = now;
     const session = await sessionPromise;
     const [liveSettings, liveRule] = await Promise.all([loadSettings(), loadSiteRule(host)]);
-    pageCommandBridge.syncCaptions?.(liveSettings, liveRule);
+    pageCommandBridge.syncOptionalFeatures?.(liveSettings, liveRule);
     // Keyboard assignment is enforced by `commands.onCommand`. This path also serves the
     // popup and context menu.
     if (!__SAKUTTO_FAKE_ENGINE__ && liveSettings.engineSource !== 'local-server') {
       void requestEngineWarm();
-      void requestEngineTier(session, false, captions);
+      void requestEngineTier(session, false);
     }
     if (command === 'compose') {
       if (shouldHandleComposeCommand(document)) {
@@ -1164,7 +968,7 @@ export function contentMain(): void {
           (message.status.state === 'loaded' || message.status.state === 'ready') &&
           !__SAKUTTO_FAKE_ENGINE__
         ) {
-          void requestEngineTier(session, true, captions);
+          void requestEngineTier(session, true);
           if (!removedActiveModel) await refreshFolderGrantUi();
         }
       });
@@ -1195,16 +999,11 @@ export function contentMain(): void {
   });
 }
 
-async function requestEngineTier(
-  session: PageSession,
-  retry = false,
-  captions: VideoCaptionSession | null = null,
-): Promise<void> {
+async function requestEngineTier(session: PageSession, retry = false): Promise<void> {
   try {
     const status = await requestEngineStatus();
     if (status?.tier) {
       session.setTier(status.tier);
-      captions?.setTier(status.tier);
     }
     if (retry || status?.model.state === 'loaded') session.retryUntranslated();
   } catch {

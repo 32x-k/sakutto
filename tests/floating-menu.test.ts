@@ -34,6 +34,7 @@ const LABELS: FloatingMenuLabels = {
   close: 'Close',
   pageTranslated: 'This page is translated.',
   pageProgress: (done, total) => `Translating ${done} / ${total}`,
+  serverError: 'Could not reach the local server.',
 };
 
 describe('shouldShowFloatingButton', () => {
@@ -170,6 +171,109 @@ describe('FloatingMenuController', () => {
     trigger.click();
     shadow.querySelector<HTMLButtonElement>('[data-sakutto-fab="hide-tab"]')!.click();
     expect(document.querySelector(FLOATING_MENU_TAG)).toBeNull();
+
+    controller.dispose();
+  });
+
+  it('shows progress ring, auto-translate dot, and inline server error banner', () => {
+    document.body.innerHTML = '<main><p>Hello world</p></main>';
+    const state: FloatingMenuState = {
+      active: true,
+      display: 'replace',
+      pending: 5,
+      done: 5,
+      total: 10,
+      auto: 'always',
+      targetLanguage: 'ja',
+      serverFault: false,
+    };
+    const onOpenOptions = vi.fn();
+    const controller = new FloatingMenuController(document, {
+      labels: LABELS,
+      preferences: { mode: 'on', position: { side: 'right', y: 70 }, uiLanguage: 'en' },
+      callbacks: {
+        onTogglePage: vi.fn(),
+        onToggleBilingual: vi.fn(),
+        onChangeTarget: vi.fn(),
+        onToggleAlways: vi.fn(),
+        onOpenTyped: vi.fn(),
+        onOpenOptions,
+        onPositionChange: vi.fn(),
+        readState: () => state,
+      },
+      env: { isTopFrame: true },
+    });
+
+    const shadow = document.querySelector(FLOATING_MENU_TAG)!.shadowRoot!;
+    const trigger = shadow.querySelector<HTMLButtonElement>('[data-sakutto-fab="trigger"]')!;
+    const dot = shadow.querySelector<HTMLSpanElement>('[data-sakutto-fab="status-dot"]')!;
+    const faultBanner = shadow.querySelector<HTMLDivElement>('[data-sakutto-fab="fault-banner"]')!;
+
+    expect(trigger.getAttribute('data-progressing')).toBe('1');
+    expect(trigger.style.getPropertyValue('--fab-progress')).toBe('50%');
+    expect(dot.hidden).toBe(false);
+    expect(dot.getAttribute('data-kind')).toBe('auto');
+    expect(faultBanner.hidden).toBe(true);
+
+    state.pending = 0;
+    state.serverFault = true;
+    controller.refresh();
+    expect(trigger.getAttribute('data-progressing')).toBe('0');
+    expect(dot.hidden).toBe(false);
+    expect(dot.getAttribute('data-kind')).toBe('fault');
+
+    trigger.click();
+    expect(faultBanner.hidden).toBe(false);
+    expect(faultBanner.textContent).toContain('Could not reach the local server.');
+    shadow.querySelector<HTMLButtonElement>('[data-sakutto-fab="fault-options"]')!.click();
+    expect(onOpenOptions).toHaveBeenCalledTimes(1);
+
+    controller.dispose();
+  });
+
+  it('hides the button for the current tab when swiped outward toward the docked edge', () => {
+    document.body.innerHTML = '<main><p>Hello world</p></main>';
+    const onPositionChange = vi.fn();
+    const controller = new FloatingMenuController(document, {
+      labels: LABELS,
+      preferences: { mode: 'on', position: { side: 'right', y: 74 }, uiLanguage: 'en' },
+      callbacks: {
+        onTogglePage: vi.fn(),
+        onToggleBilingual: vi.fn(),
+        onChangeTarget: vi.fn(),
+        onToggleAlways: vi.fn(),
+        onOpenTyped: vi.fn(),
+        onOpenOptions: vi.fn(),
+        onPositionChange,
+        readState: () => ({
+          active: false,
+          display: 'replace',
+          pending: 0,
+          done: 0,
+          total: 0,
+          auto: 'ask',
+          targetLanguage: 'ja',
+        }),
+      },
+      env: { isTopFrame: true },
+    });
+
+    const trigger = document
+      .querySelector(FLOATING_MENU_TAG)!
+      .shadowRoot!.querySelector<HTMLButtonElement>('[data-sakutto-fab="trigger"]')!;
+
+    trigger.dispatchEvent(
+      new PointerEvent('pointerdown', { pointerId: 1, button: 0, clientX: 350, clientY: 500 }),
+    );
+    trigger.dispatchEvent(
+      new PointerEvent('pointermove', { pointerId: 1, button: 0, clientX: 405, clientY: 502 }),
+    );
+    trigger.dispatchEvent(
+      new PointerEvent('pointerup', { pointerId: 1, button: 0, clientX: 405, clientY: 502 }),
+    );
+
+    expect(document.querySelector(FLOATING_MENU_TAG)).toBeNull();
+    expect(onPositionChange).not.toHaveBeenCalled();
 
     controller.dispose();
   });

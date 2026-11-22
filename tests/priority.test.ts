@@ -136,6 +136,7 @@ describe('translation priority', () => {
   });
 
   it('keeps more page requests in flight toward a local HTTP server than a CPU tier', () => {
+    expect(translationConcurrencyFor(null, 'local-server', 1)).toBe(2);
     expect(translationConcurrencyFor(null, 'local-server', 4)).toBe(16);
     expect(translationConcurrencyFor('c8', 'local-server', 4)).toBe(16);
     expect(translationConcurrencyFor('c8', 'in-browser')).toBe(2);

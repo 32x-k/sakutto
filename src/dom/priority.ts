@@ -161,7 +161,11 @@ export const GPU_TRANSLATION_CONCURRENCY = 32;
 export const LOCAL_SERVER_TRANSLATION_CONCURRENCY = 16;
 
 export function localServerPageConcurrency(parallel: number): number {
-  return Math.min(GPU_TRANSLATION_CONCURRENCY, Math.max(8, Math.round(parallel) * 4));
+  const slots = Math.max(1, Math.round(parallel));
+  // Single-slot local servers (e.g. FastFlowLM NPU with parallel=1) stay responsive to
+  // scrolling and selection interrupts when only one next batch waits behind the active slot.
+  if (slots <= 1) return TRANSLATION_CONCURRENCY;
+  return Math.min(GPU_TRANSLATION_CONCURRENCY, Math.max(4, slots * 4));
 }
 
 export function translationConcurrencyFor(

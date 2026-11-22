@@ -6,6 +6,7 @@ import {
   TRANSLATION_POPUP_SIZE_DEFAULT,
   TRANSLATION_POPUP_WIDTH_MIN_EM,
 } from '@/shared/settings';
+import { applyBarTheme, samplePageTheme } from './page-theme';
 import { LINE_TAG } from './render';
 
 /** Custom property carrying the popup text scale on each popup host. */
@@ -556,48 +557,180 @@ function appendSelectionIcon(doc: Document, button: HTMLButtonElement): void {
   button.append(svg);
 }
 
+const BAR_AUTO_HIDE_MS = 3_500;
+const BAR_FADE_MS = 220;
+
 const BAR_STYLE = `
+:host {
+  --bar-bg: rgba(255, 255, 255, 0.84);
+  --bar-text: #0f172a;
+  --bar-muted: rgba(15, 23, 42, 0.72);
+  --bar-border: rgba(15, 23, 42, 0.10);
+  --bar-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+  --bar-btn-bg: rgba(15, 23, 42, 0.06);
+  --bar-btn-hover: rgba(15, 23, 42, 0.11);
+  --bar-btn-border: rgba(15, 23, 42, 0.12);
+  --bar-accent: #0f766e;
+  --bar-track: rgba(15, 118, 110, 0.16);
+  --bar-warning: #b45309;
+}
 .bar {
+  position: relative;
   box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   height: 40px;
   padding: 0 12px;
-  border-bottom: 1px solid #d5dde6;
-  background: #ffffff;
-  color: #18202d;
-  font: 13px/1.4 "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
-  box-shadow: 0 1px 0 rgb(15 23 32 / 8%);
+  border-bottom: 1px solid var(--bar-border);
+  background: var(--bar-bg);
+  color: var(--bar-text);
+  font: 12.5px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  backdrop-filter: blur(14px) saturate(145%);
+  -webkit-backdrop-filter: blur(14px) saturate(145%);
+  box-shadow: var(--bar-shadow);
+  transition: opacity 0.22s ease, transform 0.22s ease, background 0.2s ease, color 0.2s ease;
+}
+.bar.closing {
+  opacity: 0;
+  transform: translateY(-100%);
+  pointer-events: none;
+}
+.lead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--bar-accent);
+  box-shadow: 0 0 0 0 var(--bar-track);
+}
+.bar[data-status="translating"] .indicator {
+  animation: sakutto-bar-pulse 1.4s ease-in-out infinite;
+}
+.bar[data-status="partial"] .indicator,
+.bar[data-status="error"] .indicator {
+  background: var(--bar-warning);
+}
+.bar-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 .actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 button {
-  border: 1px solid #c5d0dc;
+  border: 1px solid var(--bar-btn-border);
   border-radius: 999px;
-  background: #f7f9fb;
+  background: var(--bar-btn-bg);
   color: inherit;
   font: inherit;
-  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  line-height: 1.3;
+  white-space: nowrap;
   cursor: pointer;
+  transition: background 0.14s ease, opacity 0.14s ease;
+}
+button:hover:not(:disabled) {
+  background: var(--bar-btn-hover);
 }
 button:disabled {
-  opacity: 0.7;
+  opacity: 0.58;
   cursor: default;
 }
-@media (prefers-color-scheme: dark) {
+button.close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--bar-muted);
+  font-size: 16px;
+  line-height: 1;
+}
+button.close-btn:hover {
+  background: var(--bar-btn-bg);
+  color: var(--bar-text);
+}
+.progress-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2.5px;
+  background: var(--bar-track);
+  overflow: hidden;
+  pointer-events: none;
+}
+.progress-fill {
+  position: relative;
+  height: 100%;
+  width: 0%;
+  border-radius: 0 2px 2px 0;
+  background: var(--bar-accent);
+  transition: width 0.24s cubic-bezier(0.22, 1, 0.36, 1), background 0.2s ease, opacity 0.3s ease;
+}
+.bar[data-status="translating"] .progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  animation: sakutto-bar-sheen 1.25s linear infinite;
+}
+.bar[data-status="partial"] .progress-fill,
+.bar[data-status="error"] .progress-fill {
+  background: var(--bar-warning);
+}
+@keyframes sakutto-bar-pulse {
+  0%, 100% { transform: scale(0.92); opacity: 0.78; box-shadow: 0 0 0 0 var(--bar-track); }
+  50% { transform: scale(1.18); opacity: 1; box-shadow: 0 0 0 4px var(--bar-track); }
+}
+@keyframes sakutto-bar-sheen {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+@media (max-width: 520px) {
   .bar {
-    border-bottom-color: #2d3947;
-    background: #151b23;
-    color: #edf1f6;
+    gap: 6px;
+    padding: 0 8px 0 10px;
+    font-size: 12px;
   }
   button {
-    border-color: #3c4b5e;
-    background: #1d2631;
+    font-size: 11px;
+    padding: 3px 8px;
+  }
+  .bar-always {
+    max-width: 108px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bar,
+  .progress-fill,
+  .bar[data-status="translating"] .indicator,
+  .bar[data-status="translating"] .progress-fill::after {
+    animation: none;
+    transition: none;
   }
 }
 `;
@@ -622,9 +755,17 @@ export class PageOverlay {
   private readonly popCopyNote: HTMLElement;
   private readonly status: HTMLElement;
   private readonly bar: HTMLElement;
+  private readonly barRow: HTMLElement;
   private readonly barText: HTMLElement;
   private readonly barOriginal: HTMLButtonElement;
   private readonly barAlways: HTMLButtonElement;
+  private readonly barClose: HTMLButtonElement;
+  private readonly barProgressFill: HTMLElement;
+  private barAutoHideTimer: ReturnType<typeof setTimeout> | null = null;
+  private barFadeTimer: ReturnType<typeof setTimeout> | null = null;
+  private barHovered = false;
+  private barDismissed = false;
+  private barAutoHidePending = false;
   private readonly folderEnableHost: HTMLElement;
   private readonly folderEnableShadow: ShadowRoot;
   private readonly folderEnableHint: HTMLElement;
@@ -814,7 +955,16 @@ export class PageOverlay {
     style.textContent = BAR_STYLE;
     const row = doc.createElement('div');
     row.className = 'bar';
+    row.dataset.status = 'translating';
+    const lead = doc.createElement('div');
+    lead.className = 'lead';
+    const indicator = doc.createElement('span');
+    indicator.className = 'indicator';
+    indicator.setAttribute('aria-hidden', 'true');
     this.barText = doc.createElement('span');
+    this.barText.className = 'bar-text';
+    lead.append(indicator, this.barText);
+
     const actions = doc.createElement('span');
     actions.className = 'actions';
     this.barOriginal = doc.createElement('button');
@@ -826,13 +976,47 @@ export class PageOverlay {
     });
     this.barAlways = doc.createElement('button');
     this.barAlways.type = 'button';
+    this.barAlways.className = 'bar-always';
     this.barAlways.addEventListener('click', (event) => {
       event.preventDefault();
       event.stopPropagation();
       this.onAlways();
     });
-    actions.append(this.barOriginal, this.barAlways);
-    row.append(this.barText, actions);
+    this.barClose = doc.createElement('button');
+    this.barClose.type = 'button';
+    this.barClose.className = 'close-btn';
+    this.barClose.textContent = '×';
+    this.barClose.setAttribute('aria-label', labels.close);
+    this.barClose.title = labels.close;
+    this.barClose.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.barDismissed = true;
+      this.fadeOutBar();
+    });
+    actions.append(this.barOriginal, this.barAlways, this.barClose);
+
+    const track = doc.createElement('div');
+    track.className = 'progress-track';
+    track.setAttribute('aria-hidden', 'true');
+    this.barProgressFill = doc.createElement('div');
+    this.barProgressFill.className = 'progress-fill';
+    track.append(this.barProgressFill);
+
+    row.addEventListener('pointerenter', () => {
+      this.barHovered = true;
+      this.clearBarTimers();
+      this.barRow.classList.remove('closing');
+    });
+    row.addEventListener('pointerleave', () => {
+      this.barHovered = false;
+      if (this.barAutoHidePending && !this.bar.hidden) {
+        this.scheduleBarAutoHide();
+      }
+    });
+
+    row.append(lead, actions, track);
+    this.barRow = row;
     shadow.append(style, row);
     doc.documentElement.append(this.bar);
     this.setPopupTextScale(TRANSLATION_POPUP_SIZE_DEFAULT);
@@ -898,6 +1082,8 @@ export class PageOverlay {
       if (handle) handle.title = labels.selectionResize;
     }
     this.bar.setAttribute('aria-label', labels.barLabel);
+    this.barClose.setAttribute('aria-label', labels.close);
+    this.barClose.title = labels.close;
   }
 
   /** Restore a stored width, in em at 100% text scale. `0` keeps the auto width. */
@@ -921,20 +1107,92 @@ export class PageOverlay {
     }
   }
 
-  showBar(state: { text: string; original: string; always: string; alwaysEnabled: boolean }): void {
+  showBar(state: {
+    text: string;
+    original: string;
+    always: string;
+    alwaysEnabled: boolean;
+    status?: 'translating' | 'done' | 'partial' | 'error';
+    progress?: number;
+  }): void {
+    const status = state.status ?? 'translating';
+    if (this.barDismissed && status !== 'error') return;
+
+    const wasHidden = this.bar.hidden;
+    if (wasHidden) {
+      applyBarTheme(this.bar, samplePageTheme(this.doc));
+    }
     this.barText.textContent = state.text;
     this.barOriginal.textContent = state.original;
     this.barAlways.textContent = state.always;
     this.barAlways.disabled = !state.alwaysEnabled;
+    this.barRow.dataset.status = status;
+    this.barRow.classList.remove('closing');
+
+    const ratio =
+      state.progress !== undefined
+        ? Math.min(1, Math.max(0, state.progress))
+        : status === 'done'
+          ? 1
+          : 0;
+    const widthPct =
+      status === 'translating' ? Math.max(6, Math.round(ratio * 100)) : Math.round(ratio * 100);
+    this.barProgressFill.style.width = `${String(widthPct)}%`;
+
     this.bar.hidden = false;
     this.bar.style.display = 'block';
     this.reservePage(true);
+
+    if (status === 'done') {
+      this.barAutoHidePending = true;
+      if (!this.barHovered) this.scheduleBarAutoHide();
+    } else {
+      this.barAutoHidePending = false;
+      this.clearBarTimers();
+    }
   }
 
   hideBar(): void {
+    this.clearBarTimers();
+    this.barAutoHidePending = false;
+    this.barDismissed = false;
+    this.barRow.classList.remove('closing');
     this.bar.hidden = true;
     this.bar.style.display = 'none';
     this.reservePage(false);
+  }
+
+  private clearBarTimers(): void {
+    if (this.barAutoHideTimer !== null) {
+      clearTimeout(this.barAutoHideTimer);
+      this.barAutoHideTimer = null;
+    }
+    if (this.barFadeTimer !== null) {
+      clearTimeout(this.barFadeTimer);
+      this.barFadeTimer = null;
+    }
+  }
+
+  private scheduleBarAutoHide(): void {
+    if (this.barAutoHideTimer !== null) clearTimeout(this.barAutoHideTimer);
+    this.barAutoHideTimer = setTimeout(() => {
+      this.barAutoHideTimer = null;
+      if (this.barHovered || this.bar.hidden) return;
+      this.fadeOutBar();
+    }, BAR_AUTO_HIDE_MS);
+  }
+
+  private fadeOutBar(): void {
+    this.clearBarTimers();
+    this.barAutoHidePending = false;
+    this.barRow.classList.add('closing');
+    this.barFadeTimer = setTimeout(() => {
+      this.barFadeTimer = null;
+      this.barRow.classList.remove('closing');
+      this.bar.hidden = true;
+      this.bar.style.display = 'none';
+      this.reservePage(false);
+    }, BAR_FADE_MS);
   }
 
   showOriginal(
@@ -1140,6 +1398,7 @@ export class PageOverlay {
   destroy(): void {
     if (this.statusTimer !== null) clearTimeout(this.statusTimer);
     if (this.copyTimer !== null) clearTimeout(this.copyTimer);
+    this.clearBarTimers();
     if (this.resizing) this.stopResize(this.resizing.pointerId, this.resizing.capture);
     this.style.remove();
     this.tipHost.remove();

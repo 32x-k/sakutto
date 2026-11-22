@@ -54,6 +54,15 @@ export interface PageViewState {
   segmentsPerSecond: number | null;
   /** Visible prose that stayed in the source language because no segment could be built. */
   skipped: number;
+  /** True when the active local-server translation hit a connection/server error. */
+  serverFault?: boolean;
+}
+
+export type ContentFeatureName = 'mail' | 'captions';
+
+export interface ContentFeatureLoadRequest {
+  type: 'content:load-feature';
+  feature: ContentFeatureName;
 }
 
 const PAGE_COMMANDS: ReadonlySet<string> = new Set<PageCommandName>([
@@ -258,7 +267,16 @@ export function isPageViewState(value: unknown): value is PageViewState {
     typeof value.sameLanguage === 'boolean' &&
     (value.tokensPerSecond === null || typeof value.tokensPerSecond === 'number') &&
     (value.segmentsPerSecond === null || typeof value.segmentsPerSecond === 'number') &&
-    (value.skipped === undefined || (typeof value.skipped === 'number' && value.skipped >= 0))
+    (value.skipped === undefined || (typeof value.skipped === 'number' && value.skipped >= 0)) &&
+    (value.serverFault === undefined || typeof value.serverFault === 'boolean')
+  );
+}
+
+export function isContentFeatureLoadRequest(value: unknown): value is ContentFeatureLoadRequest {
+  return (
+    isRecord(value) &&
+    value.type === 'content:load-feature' &&
+    (value.feature === 'mail' || value.feature === 'captions')
   );
 }
 

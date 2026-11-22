@@ -1,12 +1,12 @@
 import { defineContentScript } from 'wxt/utils/define-content-script';
-import { contentMain } from '@/content/main';
+import { installMailBanners } from '@/content/mail-feature';
 
 /**
- * Gmail/Outlook banner. The background registers this bundle at runtime only for mail origins
- * the reader has granted, so a fresh install does not ask for mail host access.
+ * Gmail/Outlook banner. Registered at runtime only for granted mail origins or loaded on
+ * demand from `content.js`, keeping mail banner code out of ordinary web tabs.
  */
 export default defineContentScript({
   registration: 'runtime',
   runAt: 'document_idle',
-  main: contentMain,
+  main: installMailBanners,
 });

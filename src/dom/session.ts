@@ -175,6 +175,8 @@ export interface PageViewState {
   segmentsPerSecond: number | null;
   /** Visible prose the page had when translation started that never got a translation. */
   skipped: number;
+  /** True when the active local-server translation hit a connection/server error. */
+  serverFault?: boolean;
 }
 
 type LiveState = 'idle' | 'queued' | 'running' | 'done';
@@ -688,6 +690,7 @@ export class PageSession {
       tokensPerSecond: rates.tokensPerSecond,
       segmentsPerSecond: rates.segmentsPerSecond,
       skipped: this.active ? this.skippedProse() : 0,
+      serverFault: this.active && this.serverFault,
     };
   }
 
@@ -2228,11 +2231,23 @@ export class PageSession {
     } else {
       delete root.dataset.sakuttoRate;
     }
+    const barStatus =
+      this.serverFault || this.folderPermissionFault || this.modelMissingFault
+        ? 'error'
+        : !finished
+          ? 'translating'
+          : view.skipped > 0
+            ? 'partial'
+            : 'done';
+    const progress =
+      view.total > 0 ? Math.min(1, Math.max(0, view.done / view.total)) : finished ? 1 : 0;
     this.overlay.showBar({
       text: this.barText(view),
       original: this.labels.barOriginal,
       always: view.auto === 'always' ? this.labels.barAlwaysOn : this.labels.barAlways,
       alwaysEnabled: view.auto !== 'always',
+      status: barStatus,
+      progress,
     });
   }
 

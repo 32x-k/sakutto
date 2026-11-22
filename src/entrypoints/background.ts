@@ -62,6 +62,7 @@ import {
   isCacheClearRequest,
   isCaptionPlayerResponseRequest,
   isCaptionTimedtextRequest,
+  isContentFeatureLoadRequest,
   isEngineCapabilitiesRequest,
   isEngineStatusRequest,
   isEngineTierRequest,
@@ -318,6 +319,23 @@ export default defineBackground(() => {
 
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (sender.id !== browser.runtime.id) return false;
+
+    if (isContentFeatureLoadRequest(message)) {
+      const tabId = sender.tab?.id;
+      if (tabId === undefined) {
+        sendResponse(false);
+        return true;
+      }
+      const file =
+        message.feature === 'mail' ? '/content-scripts/mail.js' : '/content-scripts/captions.js';
+      const target =
+        sender.frameId !== undefined ? { tabId, frameIds: [sender.frameId] } : { tabId };
+      void browser.scripting.executeScript({ target, files: [file] }).then(
+        () => sendResponse(true),
+        () => sendResponse(false),
+      );
+      return true;
+    }
 
     if (isCaptionPlayerResponseRequest(message)) {
       const tabId = sender.tab?.id;

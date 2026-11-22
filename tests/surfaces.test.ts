@@ -397,9 +397,8 @@ describe('WebGPU diagnostic on settings', () => {
   const options = source('entrypoints/options/App.svelte');
   const panel = source('ui/GpuDiagnostic.svelte');
 
-  it('shows the adapter report under the engine status with a copy control', () => {
-    expect(options).toContain('GpuDiagnosticView');
-    expect(options).toContain('engine?.gpuDiagnostic');
+  it('shows the adapter report component with a copy control while omitting built-in GPU diagnostics from options', () => {
+    expect(options).not.toContain('GpuDiagnosticView');
     expect(panel).toContain('diagGpuCopy');
     expect(panel).toContain('formatGpuDiagnostic');
     expect(panel).toContain('navigator.clipboard.writeText');
@@ -411,13 +410,13 @@ describe('local server settings', () => {
   const panel = source('ui/LocalServerSettings.svelte');
   const typed = source('entrypoints/typed/App.svelte');
 
-  it('hides the GPU/CPU tier picker while a local server is selected', () => {
-    expect(panel).toContain('{:else if builtin}');
-    expect(options).toContain('tierLabel');
-    expect(options).toContain('idleLabel');
-    expect(options).toContain('diagRuntime');
+  it('renders local-server settings directly without built-in engine items', () => {
+    expect(panel).not.toContain('engineSourceInBrowser');
+    expect(panel).not.toContain('{:else if builtin}');
+    expect(options).not.toContain('tierLabel');
+    expect(options).not.toContain('idleLabel');
     expect(options).not.toContain('engine-line');
-    expect(options).toContain("settings?.engineSource === 'local-server'");
+    expect(options).toContain('diagBackendLocalServer');
     expect(options).toContain('diagConcurrent');
     expect(options).toContain('requestEngineStatus');
   });
@@ -457,11 +456,11 @@ describe('local server settings', () => {
     expect(background).toContain('client.bootSource');
   });
 
-  it('exposes a concurrent-request limit for the local HTTP server', () => {
+  it('exposes a concurrent-request limit and live connection test progress for the local HTTP server', () => {
     expect(panel).toContain('localServerParallel');
     expect(panel).toContain('sakutto-local-server-models');
-    expect(panel).toContain('role="radiogroup"');
-    expect(panel).toContain('localServerExperimental');
+    expect(panel).toContain('testProgress');
+    expect(panel).toContain('testProbeText');
     expect(panel).toContain('localServerRemoteConfirmRequired');
     expect(panel).toContain('localServerExperimentalAck');
     expect(panel).toContain('PROJECT_LINKS.localServerDocs');
@@ -486,26 +485,12 @@ describe('local server settings', () => {
     const beforeRequest = switchBody.slice(0, switchBody.indexOf('await request('));
     expect(beforeRequest).not.toMatch(/\bawait\b/);
 
-    expect(panel).toContain('resolveEngineSourceSwitch');
-    const applyStart = panel.indexOf('async function applySource');
-    const applyEnd = panel.indexOf('function chooseSource');
-    const applyBody = panel.slice(applyStart, applyEnd);
-    const beforeSwitch = applyBody.slice(0, applyBody.indexOf('await resolveEngineSourceSwitch'));
-    expect(beforeSwitch).not.toMatch(/\bawait\b/);
-    expect(applyBody).toContain('result.denied');
-    expect(applyBody).toContain('syncEngineSourceRadios(settings.engineSource');
-    expect(panel).toContain('bind:this={builtinRadio}');
-    expect(panel).toContain('bind:this={localRadio}');
-
-    const confirmStart = panel.indexOf('function useLocalServer');
-    const confirmEnd = panel.indexOf('async function changeUrl');
-    const confirmBody = panel.slice(confirmStart, confirmEnd);
-    expect(confirmBody).toContain("void applySource('local-server', true)");
-    expect(confirmBody).not.toMatch(/\bawait\b/);
+    expect(panel).toContain('requestServerPermission');
+    expect(panel).toContain('grantIfNeeded');
   });
 
-  it('shows a permission denial on the engine radio when the switch did not stick', () => {
-    expect(panel).toContain('permissionDenied && !local');
+  it('shows a permission denial alert when host permission is denied', () => {
+    expect(panel).toContain('permissionDenied');
     expect(panel).toContain("t('localServerPermissionDenied')");
     expect(panel).toContain('role="alert"');
   });

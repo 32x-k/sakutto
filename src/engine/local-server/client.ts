@@ -25,10 +25,23 @@ export interface LocalServerModel {
   id: string;
 }
 
+export type ConnectionTestStage = 'models' | 'loading-model' | 'streaming' | 'done' | 'error';
+
+export interface ConnectionTestProgress {
+  stage: ConnectionTestStage;
+  modelsCount?: number;
+  model?: string;
+  probeText?: string;
+  elapsedMs: number;
+}
+
 export interface ConnectionTestResult {
   ok: boolean;
   models: LocalServerModel[];
   error?: EngineError;
+  probeText?: string;
+  elapsedMs?: number;
+  firstTokenMs?: number;
 }
 
 export type LocalServerFetch = typeof fetch;
@@ -433,7 +446,10 @@ export async function listServerModels(
   }
 }
 
-function connectionProbeRequest(signal: AbortSignal): CompletionRequest {
+function connectionProbeRequest(
+  signal: AbortSignal,
+  onToken: (token: string) => void = () => undefined,
+): CompletionRequest {
   return {
     prompt: buildTranslationPrompt({
       text: CONNECTION_PROBE_TEXT,
@@ -443,16 +459,23 @@ function connectionProbeRequest(signal: AbortSignal): CompletionRequest {
     }),
     maxTokens: CONNECTION_PROBE_MAX_TOKENS,
     signal,
-    onToken: () => undefined,
+    onToken,
   };
 }
 
 export async function testLocalServer(
   config: LocalServerConfig,
   fetchImpl: LocalServerFetch = fetch,
+  onProgress?: (progress: ConnectionTestProgress) => void,
 ): Promise<ConnectionTestResult> {
   let models: LocalServerModel[] = [];
+  const startedAt = performance.now();
+  const elapsed = (): number => Math.max(0, Math.round(performance.now() - startedAt));
+  let probeRaw = '';
+  let firstTokenMs: number | undefined;
+
   try {
+    onProgress?.({ stage: 'models', elapsedMs: 0 });
     models = await listServerModels(config, new AbortController().signal, fetchImpl);
     if (
       config.model.length > 0 &&
@@ -462,14 +485,53 @@ export async function testLocalServer(
       return {
         ok: false,
         models,
+        elapsedMs: elapsed(),
         error: new EngineError(
           'server-model-missing',
           'The local translation server has no matching model.',
         ),
       };
     }
-    await completeOnServer(config, connectionProbeRequest(new AbortController().signal), fetchImpl);
-    return { ok: true, models };
+    const activeModel = config.model || models[0]?.id || '';
+    onProgress?.({
+      stage: 'loading-model',
+      modelsCount: models.length,
+      model: activeModel,
+      elapsedMs: elapsed(),
+    });
+    await completeOnServer(
+      config,
+      connectionProbeRequest(new AbortController().signal, (token) => {
+        if (firstTokenMs === undefined && token.length > 0) {
+          firstTokenMs = elapsed();
+        }
+        probeRaw += token;
+        onProgress?.({
+          stage: 'streaming',
+          modelsCount: models.length,
+          model: activeModel,
+          probeText: probeRaw.trim(),
+          elapsedMs: elapsed(),
+        });
+      }),
+      fetchImpl,
+    );
+    const totalMs = elapsed();
+    const probeText = probeRaw.trim();
+    onProgress?.({
+      stage: 'done',
+      modelsCount: models.length,
+      model: activeModel,
+      probeText,
+      elapsedMs: totalMs,
+    });
+    return {
+      ok: true,
+      models,
+      probeText,
+      elapsedMs: totalMs,
+      ...(firstTokenMs !== undefined ? { firstTokenMs } : {}),
+    };
   } catch (error) {
     const mapped =
       error instanceof EngineError
@@ -481,7 +543,8 @@ export async function testLocalServer(
               cause: error,
             },
           );
-    return { ok: false, models, error: mapped };
+    onProgress?.({ stage: 'error', modelsCount: models.length, elapsedMs: elapsed() });
+    return { ok: false, models, elapsedMs: elapsed(), error: mapped };
   }
 }
 

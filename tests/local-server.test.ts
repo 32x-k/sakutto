@@ -502,6 +502,16 @@ describe('local server completions', () => {
       { ok: false, error: { code: 'server-model-missing' } },
     );
     await expect(testLocalServer(config(fake.url))).resolves.toMatchObject({ ok: true });
+    const stages: string[] = [];
+    const probeResult = await testLocalServer(config(fake.url), fetch, (progress) => {
+      stages.push(progress.stage);
+    });
+    expect(probeResult.ok).toBe(true);
+    expect(probeResult.probeText).toBe('こんにちは');
+    expect(stages).toContain('models');
+    expect(stages).toContain('loading-model');
+    expect(stages).toContain('streaming');
+    expect(stages).toContain('done');
   });
 
   it('treats an empty /v1/models list as unlisted, not as a missing model, and still probes completions', async () => {

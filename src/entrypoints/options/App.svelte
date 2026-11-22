@@ -1,8 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { browser } from 'wxt/browser';
-  import { SHARED_FOLDER_CHANGED_EVENT } from '@/engine/model/folder-offer';
-  import { shouldHintBuiltInFallback } from '@/engine/model/suggestion';
   import type { GlossaryEntry } from '@/engine/types';
   import type { SiteAuto, SiteRule } from '@/dom/sites';
   import {
@@ -12,32 +10,18 @@
     saveSiteRule,
     subscribeSiteRules,
   } from '@/dom/sites';
-  import type { EngineCapabilities } from '@/shared/capabilities';
   import type { EngineStatus } from '@/shared/engine-status';
-  import { hasBuiltInTranslatorUi, isAndroidPlatform, isFirefoxBuild } from '@/shared/browser';
+  import { isAndroidPlatform, isFirefoxBuild } from '@/shared/browser';
   import { openOrFocusExtensionTab } from '@/shared/extension-tabs';
   import { currentUiLanguage, t, tForBrowser } from '@/shared/i18n';
-  import {
-    requestCacheClear,
-    requestEngineCapabilities,
-    isModelProgressMessage,
-    requestEngineStatus,
-    requestEngineTier,
-    requestQualitySample,
-  } from '@/shared/messages';
-  import { FOLDER_PERMISSION_ERROR } from '@/engine/model/folder-permission';
-  import type { QualitySample } from '@/shared/quality';
+  import { requestCacheClear, requestEngineStatus } from '@/shared/messages';
   import { PLAMO_OFFICIAL_LINKS, PROJECT_LINKS } from '@/shared/plamo-license';
-  import type { IdleMinutes, Settings, SettingsPatch, TierPreference } from '@/shared/settings';
-  import { isIdleMinutes, isTierPreference } from '@/shared/settings';
+  import type { Settings, SettingsPatch } from '@/shared/settings';
   import type { TargetLanguage } from '@/shared/languages';
   import { settleCaptionEnableIntent } from '@/captions/sites';
   import { loadSettings, saveSettings, subscribeSettings } from '@/shared/storage';
-  import EngineStatusView from '@/ui/EngineStatus.svelte';
-  import GpuDiagnosticView from '@/ui/GpuDiagnostic.svelte';
   import LanguageField from '@/ui/LanguageField.svelte';
   import GlossaryEditor from '@/ui/GlossaryEditor.svelte';
-  import { runtimeLabel } from '@/ui/runtime-label';
   import SettingsFields from '@/ui/SettingsFields.svelte';
   import ShortcutSettings from '@/ui/ShortcutSettings.svelte';
   import LocalServerSettings from '@/ui/LocalServerSettings.svelte';
@@ -66,9 +50,6 @@
   let glossaryScope = $state('global');
   let permissionError = $state(false);
   let engine = $state<EngineStatus | null>(null);
-  let capabilities = $state<EngineCapabilities | null>(null);
-  let capabilitiesFailed = $state(false);
-  let quality = $state<QualitySample | null>(null);
   let cacheState = $state<CacheState>(null);
   let actionFailed = $state(false);
 
@@ -80,18 +61,6 @@
       ? (settings?.glossary ?? [])
       : (rules[glossaryScope]?.glossary ?? []),
   );
-  let showSlow = $derived(
-    hasBuiltInTranslatorUi() &&
-      shouldHintBuiltInFallback(engine?.tier ?? null, quality?.milliseconds ?? null),
-  );
-  let engineLine = $derived.by(() => {
-    const label = runtimeLabel({
-      status: engine,
-      pageSimple: false,
-      targetLanguage: settings?.targetLanguage ?? 'en',
-    });
-    return t(label.key, label.substitutions);
-  });
 
   async function updateSettings(patch: SettingsPatch) {
     try {
@@ -111,7 +80,15 @@
 
   async function loadStoredSettings() {
     try {
-      settings = await loadSettings();
+      const loaded = await loadSettings();
+      if (loaded.engineSource !== 'local-server' || !loaded.localServerExperimentalAck) {
+        settings = await saveSettings({
+          engineSource: 'local-server',
+          localServerExperimentalAck: true,
+        });
+      } else {
+        settings = loaded;
+      }
       settingsError = null;
     } catch {
       settingsError = 'load';
@@ -175,23 +152,6 @@
     await loadRules();
   }
 
-  async function changeTier(event: Event) {
-    const select = event.currentTarget as HTMLSelectElement;
-    if (!isTierPreference(select.value)) return;
-    const tier: TierPreference = select.value;
-    await updateSettings({ tier });
-    await requestEngineTier(tier);
-    engine = await requestEngineStatus();
-  }
-
-  async function changeIdle(event: Event) {
-    const select = event.currentTarget as HTMLSelectElement;
-    const minutes = Number(select.value);
-    if (!isIdleMinutes(minutes)) return;
-    const idleMinutes: IdleMinutes = minutes;
-    await updateSettings({ idleMinutes });
-  }
-
   async function clearCache() {
     cacheState = (await requestCacheClear()) ? 'cleared' : 'failed';
   }
@@ -223,40 +183,12 @@
     });
     void loadStoredSettings();
     void loadRules();
-    const refreshEngine = () => {
-      void requestEngineStatus().then((status) => {
-        if (status) engine = status;
-      });
-    };
-    const onFolderChanged = () => {
-      refreshEngine();
-    };
-    const onMessage = (message: unknown) => {
-      if (!isModelProgressMessage(message)) return;
-      if (
-        message.status.error === FOLDER_PERMISSION_ERROR ||
-        message.status.state === 'ready' ||
-        message.status.state === 'loaded' ||
-        message.status.state === 'loading'
-      ) {
-        refreshEngine();
-      }
-    };
-    window.addEventListener(SHARED_FOLDER_CHANGED_EVENT, onFolderChanged);
-    browser.runtime.onMessage.addListener(onMessage);
-    refreshEngine();
-    void requestEngineCapabilities().then((value) => {
-      capabilities = value;
-      capabilitiesFailed = value === null;
-    });
-    void requestQualitySample().then((sample) => {
-      quality = sample;
+    void requestEngineStatus().then((status) => {
+      if (status) engine = status;
     });
     return () => {
       unsubscribe();
       unsubscribeRules();
-      window.removeEventListener(SHARED_FOLDER_CHANGED_EVENT, onFolderChanged);
-      browser.runtime.onMessage.removeListener(onMessage);
     };
   });
 </script>
@@ -294,39 +226,7 @@
   <section class="panel" id="engine-settings">
     <h2>{t('engineHeading')}</h2>
     {#if settings}
-      {@const current = settings}
-      <LocalServerSettings settings={current} onUpdate={updateSettings}>
-        {#snippet builtin()}
-          <div class="engine-card">
-            <label class="field">
-              <span>{t('tierLabel')}</span>
-              <select value={current.tier} onchange={changeTier}>
-                <option value="auto">{t('tierAuto')}</option>
-                <option value="g">{t('tierGpu')}</option>
-                {#if isFirefoxBuild()}
-                  <option value="c1">{t('tierCpu1')}</option>
-                {:else}
-                  <option value="c8">{t('tierCpu8')}</option>
-                  <option value="c4">{t('tierCpu4')}</option>
-                {/if}
-              </select>
-            </label>
-            <p class="note">{t('tierHelp')}</p>
-            <label class="field">
-              <span>{t('idleLabel')}</span>
-              <select value={String(current.idleMinutes)} onchange={changeIdle}>
-                <option value="1">{t('idle1')}</option>
-                <option value="5">{t('idle5')}</option>
-                <option value="15">{t('idle15')}</option>
-                <option value="0">{t('idleNever')}</option>
-              </select>
-            </label>
-          </div>
-        {/snippet}
-      </LocalServerSettings>
-    {/if}
-    {#if showSlow}
-      <p class="muted help">{t('slowDeviceHint')}</p>
+      <LocalServerSettings {settings} onUpdate={updateSettings} />
     {/if}
     <div class="cache-row">
       <button class="button secondary" type="button" onclick={clearCache}>{t('cacheClear')}</button>
@@ -338,50 +238,20 @@
     </div>
     <details class="more diag-details">
       <summary>{t('diagHeading')}</summary>
-      {#if settings?.engineSource === 'local-server'}
-        <dl class="diag">
-          <div>
-            <dt>{t('diagBackend')}</dt>
-            <dd>{t('diagBackendLocalServer')}</dd>
-          </div>
-          <div>
-            <dt>{t('diagConcurrent')}</dt>
-            <dd>
-              {engine?.engineSource === 'local-server'
-                ? (engine.parallel ?? settings.localServerParallel)
-                : settings.localServerParallel}
-            </dd>
-          </div>
-        </dl>
-      {:else}
-        <dl class="diag">
-          <div>
-            <dt>{t('diagRuntime')}</dt>
-            <dd>{engineLine}</dd>
-          </div>
-          <div>
-            <dt>{t('diagBackend')}</dt>
-            <dd>
-              {engine?.backend === 'webgpu'
-                ? t('diagBackendGpu')
-                : engine?.backend === 'cpu-wasm'
-                  ? t('diagBackendCpu')
-                  : t('diagBackendUnknown')}
-            </dd>
-          </div>
-          <div>
-            <dt>{t('diagThreads')}</dt>
-            <dd>{engine?.threads ?? '—'}</dd>
-          </div>
-          <div>
-            <dt>{t('diagParallel')}</dt>
-            <dd>{engine?.parallel ?? '—'}</dd>
-          </div>
-        </dl>
-        <p class="muted help">{t('diagRateHint')}</p>
-        <EngineStatusView {capabilities} failed={capabilitiesFailed} detailed />
-        <GpuDiagnosticView diagnostic={engine?.gpuDiagnostic} />
-      {/if}
+      <dl class="diag">
+        <div>
+          <dt>{t('diagBackend')}</dt>
+          <dd>{t('diagBackendLocalServer')}</dd>
+        </div>
+        <div>
+          <dt>{t('diagConcurrent')}</dt>
+          <dd>
+            {engine?.engineSource === 'local-server'
+              ? (engine.parallel ?? settings?.localServerParallel ?? '—')
+              : (settings?.localServerParallel ?? '—')}
+          </dd>
+        </div>
+      </dl>
     </details>
   </section>
 
@@ -655,28 +525,6 @@
 
   .help {
     margin-bottom: var(--space-3);
-  }
-
-  .engine-card {
-    display: grid;
-    gap: var(--space-3);
-    margin-top: var(--space-2);
-    padding: var(--space-4);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    background: var(--surface-muted);
-  }
-
-  .engine-card .note {
-    margin: 0;
-    color: var(--muted);
-    font-size: 12px;
-    font-weight: 400;
-    line-height: 1.5;
-  }
-
-  .engine-card .field {
-    gap: var(--space-2);
   }
 
   h3 {

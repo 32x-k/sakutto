@@ -135,7 +135,7 @@ export function lookaheadScreens(
 ): number {
   const base =
     engineSource === 'local-server'
-      ? 2
+      ? 3.5
       : tier === 'g'
         ? 2
         : tier === 'c4' || tier === 'c1'

@@ -4,7 +4,12 @@ import { ComposeController, type ComposeLabels, type ComposePreferences } from '
 import { shouldHandleComposeCommand } from '@/dom/compose-field';
 import { detectDocumentLanguage } from '@/dom/detect';
 import { fakeTranslate } from '@/dom/fake-engine';
-import { FloatingMenuController, type FloatingMenuLabels } from '@/dom/floating-menu';
+import {
+  FloatingMenuController,
+  type FloatingMenuLabels,
+  type FloatingMenuProbeStatus,
+} from '@/dom/floating-menu';
+import { isRecord } from '@/shared/object';
 import { isMailHost } from '@/dom/mail-sites';
 import type { OverlayLabels } from '@/dom/overlay';
 import {
@@ -272,13 +277,16 @@ function overlayLabels(): OverlayLabels {
 }
 
 function floatingMenuLabels(): FloatingMenuLabels {
+  const ja = currentUiLanguage().toLowerCase().startsWith('ja');
   return {
     brand: t('extensionShortName'),
     translatePage: t('translateThisPage'),
     restorePage: t('restoreThisPage'),
+    retranslatePage: ja ? '再翻訳（キャッシュ更新）' : 'Retranslate (refresh cache)',
     displayReplace: t('displayReplace'),
     displayBilingual: t('displayBilingual'),
     targetLabel: t('targetLanguageLabel'),
+    modelLabel: ja ? 'モデル切替' : 'Model',
     alwaysSite: t('alwaysTranslateSite'),
     openTyped: t('openTyped'),
     openOptions: t('openOptions'),
@@ -644,6 +652,131 @@ export function contentMain(): void {
     pageCommandBridge.syncOptionalFeatures = syncOptionalFeatures;
     syncOptionalFeatures(liveSettings, liveRule);
 
+    let activeProbePort: ReturnType<typeof browser.runtime.connect> | null = null;
+    let activeProbeTimer = 0;
+    let liveProbeStatus: FloatingMenuProbeStatus | null = null;
+
+    const stopModelProbe = (): void => {
+      if (activeProbeTimer !== 0) {
+        window.clearInterval(activeProbeTimer);
+        activeProbeTimer = 0;
+      }
+      if (activeProbePort) {
+        try {
+          activeProbePort.disconnect();
+        } catch {
+          readRuntimeLastError();
+        }
+        activeProbePort = null;
+      }
+    };
+
+    const startModelProbe = (modelId: string): void => {
+      stopModelProbe();
+      const ja = currentUiLanguage().toLowerCase().startsWith('ja');
+      const startedAt = performance.now();
+      let latestStage = 'models';
+      let latestProbeText = '';
+      const fmtSec = (ms: number): string => `${(ms / 1000).toFixed(2)}s`;
+
+      const updateRunningLabel = (): void => {
+        const sec = fmtSec(Math.max(0, Math.round(performance.now() - startedAt)));
+        if (latestStage === 'models') {
+          liveProbeStatus = {
+            active: true,
+            text: ja
+              ? `モデル一覧を確認中 (/v1/models)… (${sec})`
+              : `Checking server models… (${sec})`,
+          };
+        } else if (latestStage === 'loading-model') {
+          liveProbeStatus = {
+            active: true,
+            text: ja
+              ? `モデル切替・準備中 [${modelId}] (${sec})`
+              : `Loading model [${modelId}]… (${sec})`,
+            detail: '"Hi." → …',
+          };
+        } else if (latestStage === 'streaming') {
+          liveProbeStatus = {
+            active: true,
+            text: ja
+              ? `応答を受信中 [${modelId}] (${sec})`
+              : `Receiving response [${modelId}] (${sec})`,
+            detail: latestProbeText ? `"Hi." → "${latestProbeText}"` : '"Hi." → …',
+          };
+        }
+        floatingMenu?.refresh();
+      };
+
+      updateRunningLabel();
+      activeProbeTimer = window.setInterval(updateRunningLabel, 150);
+
+      try {
+        const port = browser.runtime.connect({
+          name: `sakutto:local-server-probe:${modelId}`,
+        });
+        activeProbePort = port;
+        port.onMessage.addListener((msg: unknown) => {
+          if (!isRecord(msg)) return;
+          if (msg.type === 'progress' && isRecord(msg.progress)) {
+            if (typeof msg.progress.stage === 'string') latestStage = msg.progress.stage;
+            if (typeof msg.progress.probeText === 'string') {
+              latestProbeText = msg.progress.probeText;
+            }
+            updateRunningLabel();
+            return;
+          }
+          if (msg.type === 'result') {
+            stopModelProbe();
+            const ok = msg.ok === true;
+            const totalMs =
+              typeof msg.elapsedMs === 'number'
+                ? msg.elapsedMs
+                : Math.max(0, Math.round(performance.now() - startedAt));
+            const ttftMs = typeof msg.firstTokenMs === 'number' ? msg.firstTokenMs : null;
+            const probeText =
+              typeof msg.probeText === 'string' && msg.probeText.length > 0
+                ? msg.probeText
+                : latestProbeText;
+            if (ok) {
+              const latencyLabel =
+                ttftMs !== null && ttftMs < totalMs
+                  ? ja
+                    ? `初回 ${fmtSec(ttftMs)} / 合計 ${fmtSec(totalMs)}`
+                    : `TTFT ${fmtSec(ttftMs)} / Total ${fmtSec(totalMs)}`
+                  : fmtSec(totalMs);
+              liveProbeStatus = {
+                active: false,
+                ok: true,
+                text: ja
+                  ? `✓ ${modelId} 接続完了 (${latencyLabel})`
+                  : `✓ ${modelId} ready (${latencyLabel})`,
+                ...(probeText ? { detail: `"Hi." → "${probeText}"` } : {}),
+              };
+            } else {
+              const errObj = isRecord(msg.error) ? msg.error : null;
+              const detail =
+                typeof errObj?.detail === 'string'
+                  ? errObj.detail
+                  : typeof errObj?.message === 'string'
+                    ? errObj.message
+                    : '';
+              liveProbeStatus = {
+                active: false,
+                ok: false,
+                text: ja ? `✕ ${modelId} 接続失敗` : `✕ ${modelId} connection failed`,
+                ...(detail ? { detail } : {}),
+              };
+            }
+            floatingMenu?.refresh();
+          }
+        });
+      } catch {
+        readRuntimeLastError();
+        stopModelProbe();
+      }
+    };
+
     floatingMenu = new FloatingMenuController(document, {
       labels: floatingMenuLabels(),
       preferences: {
@@ -655,6 +788,27 @@ export function contentMain(): void {
         onTogglePage: () => {
           markExplicitPageActivation();
           pageCommandBridge.deliver?.('toggle');
+        },
+        onRetranslate: () => {
+          markExplicitPageActivation();
+          session.retranslatePage({ bypassCache: true });
+          floatingMenu?.refresh();
+        },
+        onSelectModel: (modelId) => {
+          liveSettings = {
+            ...liveSettings,
+            engineSource: 'local-server',
+            localServerExperimentalAck: true,
+            localServerModel: modelId,
+          };
+          void saveSettings({
+            engineSource: 'local-server',
+            localServerExperimentalAck: true,
+            localServerModel: modelId,
+          });
+          startModelProbe(modelId);
+          session.setPreferences(preferencesFor(liveSettings, liveRule, host));
+          floatingMenu?.refresh();
         },
         onToggleBilingual: () => {
           markExplicitPageActivation();
@@ -708,6 +862,8 @@ export function contentMain(): void {
             auto: liveRule.auto,
             serverFault: view.serverFault === true,
             cached: view.cached ?? 0,
+            localServerModel: liveSettings.localServerModel,
+            probeStatus: liveProbeStatus,
             targetLanguage: effectivePageTarget(
               liveSettings.targetLanguage,
               liveRule.targetLanguage,

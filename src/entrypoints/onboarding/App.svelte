@@ -422,8 +422,11 @@
       : null;
     void pack?.catch(() => undefined);
 
+    let savedSource: string;
     try {
-      await saveSettings({
+      const saved = await saveSettings({
+        engineSource: 'local-server',
+        localServerExperimentalAck: true,
         consent: {
           license: 'plamo-community',
           version: PLAMO_LICENSE_VERSION,
@@ -432,11 +435,17 @@
           ageNoticeShown: true,
         },
       });
+      savedSource = saved.engineSource;
       consentSaved = true;
       reconsent = false;
     } catch {
       phase = 'error';
       startRequested = false;
+      return;
+    }
+
+    if (savedSource === 'local-server') {
+      phase = 'ready';
       return;
     }
 

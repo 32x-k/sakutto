@@ -248,6 +248,7 @@
   });
   let offer = $derived(
     settings !== null &&
+      settings.engineSource !== 'local-server' &&
       shouldSuggestHighQuality({
         tier: engine?.tier ?? null,
         paragraphMs: quality?.milliseconds ?? null,
@@ -262,7 +263,15 @@
 
   async function refreshSettings() {
     try {
-      settings = await loadSettings();
+      const loaded = await loadSettings();
+      if (loaded.engineSource !== 'local-server' || !loaded.localServerExperimentalAck) {
+        settings = await saveSettings({
+          engineSource: 'local-server',
+          localServerExperimentalAck: true,
+        });
+      } else {
+        settings = loaded;
+      }
       settingsError = null;
     } catch {
       settingsError = 'load';

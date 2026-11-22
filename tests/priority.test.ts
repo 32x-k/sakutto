@@ -131,8 +131,8 @@ describe('translation priority', () => {
     expect(lookaheadScreens('g', 'fast')).toBeGreaterThan(lookaheadScreens('g', 'quality'));
     expect(lookaheadScreens('c8', 'fast')).toBeGreaterThan(lookaheadScreens('c8', 'quality'));
     expect(lookaheadScreens(null, 'fast')).toBeGreaterThan(lookaheadScreens(null, 'quality'));
-    expect(lookaheadScreens(null, 'quality', 'local-server')).toBe(2);
-    expect(lookaheadScreens('c1', 'quality', 'local-server')).toBe(2);
+    expect(lookaheadScreens(null, 'quality', 'local-server')).toBe(3.5);
+    expect(lookaheadScreens('c1', 'quality', 'local-server')).toBe(3.5);
   });
 
   it('keeps more page requests in flight toward a local HTTP server than a CPU tier', () => {

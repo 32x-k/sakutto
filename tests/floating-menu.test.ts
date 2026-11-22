@@ -277,6 +277,89 @@ describe('FloatingMenuController', () => {
 
     controller.dispose();
   });
+
+  it('switches models, displays live probe response status, and triggers retranslation', () => {
+    document.body.innerHTML = '<main><p>Hello world</p></main>';
+    const state: FloatingMenuState = {
+      active: true,
+      display: 'replace',
+      pending: 0,
+      done: 4,
+      total: 4,
+      auto: 'ask',
+      targetLanguage: 'ja',
+      localServerModel: 'plamo3-translate:2b',
+      probeStatus: null,
+    };
+    const onRetranslate = vi.fn();
+    const onSelectModel = vi.fn((modelId: string) => {
+      state.localServerModel = modelId;
+      state.probeStatus = {
+        active: true,
+        text: `Loading model [${modelId}]… (0.15s)`,
+        detail: '"Hi." → …',
+      };
+    });
+    const controller = new FloatingMenuController(document, {
+      labels: LABELS,
+      preferences: { mode: 'on', position: { side: 'right', y: 70 }, uiLanguage: 'ja' },
+      callbacks: {
+        onTogglePage: vi.fn(),
+        onRetranslate,
+        onSelectModel,
+        onToggleBilingual: vi.fn(),
+        onChangeTarget: vi.fn(),
+        onToggleAlways: vi.fn(),
+        onOpenTyped: vi.fn(),
+        onOpenOptions: vi.fn(),
+        onPositionChange: vi.fn(),
+        readState: () => state,
+      },
+      env: { isTopFrame: true },
+    });
+
+    const shadow = document.querySelector(FLOATING_MENU_TAG)!.shadowRoot!;
+    shadow.querySelector<HTMLButtonElement>('[data-sakutto-fab="trigger"]')!.click();
+
+    const pill2b = shadow.querySelector<HTMLButtonElement>(
+      '[data-sakutto-fab-model="plamo3-translate:2b"]',
+    )!;
+    const pill8b = shadow.querySelector<HTMLButtonElement>(
+      '[data-sakutto-fab-model="plamo3-translate:8b"]',
+    )!;
+    expect(pill2b.getAttribute('aria-pressed')).toBe('true');
+    expect(pill8b.getAttribute('aria-pressed')).toBe('false');
+
+    pill8b.click();
+    expect(onSelectModel).toHaveBeenCalledWith('plamo3-translate:8b');
+    expect(pill8b.getAttribute('aria-pressed')).toBe('true');
+
+    const probeBox = shadow.querySelector<HTMLDivElement>(
+      '[data-sakutto-fab="model-probe-status"]',
+    )!;
+    expect(probeBox.hidden).toBe(false);
+    expect(probeBox.getAttribute('data-state')).toBe('running');
+    expect(probeBox.textContent).toContain('Loading model [plamo3-translate:8b]');
+
+    state.probeStatus = {
+      active: false,
+      ok: true,
+      text: '✓ plamo3-translate:8b 接続完了 (1.20s)',
+      detail: '"Hi." → "こんにちは。"',
+    };
+    controller.refresh();
+    expect(probeBox.getAttribute('data-state')).toBe('ok');
+    expect(probeBox.textContent).toContain('"Hi." → "こんにちは。"');
+
+    const retranslateBtn = shadow.querySelector<HTMLButtonElement>(
+      '[data-sakutto-fab="retranslate"]',
+    )!;
+    expect(retranslateBtn.hidden).toBe(false);
+    retranslateBtn.click();
+    expect(onRetranslate).toHaveBeenCalledTimes(1);
+
+    controller.dispose();
+  });
 });
 
 describe('floating button settings normalization', () => {

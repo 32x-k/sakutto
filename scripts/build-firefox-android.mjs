@@ -43,8 +43,10 @@ manifest.browser_specific_settings = {
 };
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
 
-// Strip bundled wllama WASM (~26.5 MB) for lightweight local-server Android package.
+// Strip bundled wllama WASM (~26.5 MB) and desktop-only PDF.js viewer (~3.6 MB) for lightweight local-server Android package.
 rmSync(join(androidDir, 'vendor', 'wllama'), { recursive: true, force: true });
+rmSync(join(androidDir, 'vendor', 'pdfjs'), { recursive: true, force: true });
+rmSync(join(androidDir, 'reader.html'), { force: true });
 
 if (existsSync(xpiPath)) rmSync(xpiPath, { force: true });
 execFileSync(

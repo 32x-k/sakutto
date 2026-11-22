@@ -467,16 +467,18 @@ export async function testLocalServer(
   config: LocalServerConfig,
   fetchImpl: LocalServerFetch = fetch,
   onProgress?: (progress: ConnectionTestProgress) => void,
+  signal?: AbortSignal,
 ): Promise<ConnectionTestResult> {
   let models: LocalServerModel[] = [];
   const startedAt = performance.now();
   const elapsed = (): number => Math.max(0, Math.round(performance.now() - startedAt));
   let probeRaw = '';
   let firstTokenMs: number | undefined;
+  const activeSignal = signal ?? new AbortController().signal;
 
   try {
     onProgress?.({ stage: 'models', elapsedMs: 0 });
-    models = await listServerModels(config, new AbortController().signal, fetchImpl);
+    models = await listServerModels(config, activeSignal, fetchImpl);
     if (
       config.model.length > 0 &&
       models.length > 0 &&
@@ -501,7 +503,7 @@ export async function testLocalServer(
     });
     await completeOnServer(
       config,
-      connectionProbeRequest(new AbortController().signal, (token) => {
+      connectionProbeRequest(activeSignal, (token) => {
         if (firstTokenMs === undefined && token.length > 0) {
           firstTokenMs = elapsed();
         }

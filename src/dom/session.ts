@@ -163,6 +163,7 @@ export interface SessionPreferences {
   pace: TranslationPace;
   engineSource?: 'in-browser' | 'local-server';
   localServerParallel?: number;
+  localServerModel?: string;
   glossary?: readonly GlossaryEntry[];
 }
 
@@ -330,6 +331,7 @@ export function preferencesFor(
     pace: settings.pace,
     engineSource: settings.engineSource,
     localServerParallel: settings.localServerParallel,
+    localServerModel: settings.localServerModel,
     ...(glossary.length > 0 ? { glossary } : {}),
   };
 }
@@ -397,6 +399,7 @@ export class PageSession {
   private applying = 0;
   /** Set when a local-server request fails, so the bar can keep the Settings hint. */
   private serverFault = false;
+  private forceBypassCache = false;
   private folderPermissionFault = false;
   /** Set when the active model is deleted, so the bar stops counting unfinished work. */
   private modelMissingFault = false;
@@ -667,6 +670,7 @@ export class PageSession {
     const languageChanged =
       next.targetLanguage !== previous.targetLanguage ||
       next.form !== previous.form ||
+      (next.localServerModel ?? '') !== (previous.localServerModel ?? '') ||
       glossaryKey(next.glossary) !== glossaryKey(previous.glossary);
     if (languageChanged && this.active) {
       this.retranslate();
@@ -674,6 +678,19 @@ export class PageSession {
         if (this.active) this.pump();
       });
     }
+  }
+
+  retranslatePage(options?: { bypassCache?: boolean }): void {
+    this.forceBypassCache = options?.bypassCache === true;
+    this.serverFault = false;
+    if (!this.active) {
+      void this.translate();
+      return;
+    }
+    this.retranslate();
+    void this.requestScan().then(() => {
+      if (this.active) this.pump();
+    });
   }
 
   setTier(tier: 'g' | 'c8' | 'c4' | 'c1' | null): void {
@@ -795,6 +812,7 @@ export class PageSession {
 
   restore(): void {
     this.active = false;
+    this.forceBypassCache = false;
     this.serverFault = false;
     this.folderPermissionFault = false;
     this.modelMissingFault = false;
@@ -1849,6 +1867,7 @@ export class PageSession {
       ...(glossary.length > 0 ? { glossary } : {}),
       ...(context ? { context } : {}),
       ...(eager ? { eager: true } : {}),
+      ...(this.forceBypassCache ? { bypassCache: true } : {}),
     };
   }
 
@@ -1987,6 +2006,7 @@ export class PageSession {
       item.partText = [];
       item.partFinal = [];
       item.partError = [];
+      item.partCached = [];
       item.state = 'idle';
       this.enqueue(item, true);
     }
@@ -2267,6 +2287,7 @@ export class PageSession {
     // `translated` is what the popup and the e2e suite read, so it may only appear when
     // the page really is translated. Leftover source prose keeps the page `partial`.
     const finished = view.pending === 0;
+    if (finished && view.total > 0) this.forceBypassCache = false;
     root.dataset.sakuttoState = finished
       ? view.skipped > 0
         ? 'partial'

@@ -80,7 +80,6 @@ export class CachingEngine implements IdentifiedEngine {
       const copies = key ? (aliases.get(key) ?? []) : [];
       const source = sources.get(chunk.id) ?? '';
       if (
-        !bypass &&
         chunk.final !== undefined &&
         chunk.final.length > 0 &&
         key &&

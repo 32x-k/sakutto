@@ -1,3 +1,4 @@
+import { FASTFLOWLM_PLAMO_MODELS } from '@/engine/local-server/url';
 import { isAndroidPlatform, type PlatformNavigator } from '@/shared/browser';
 import {
   JA_EASY_TARGET,
@@ -55,9 +56,11 @@ export interface FloatingMenuLabels {
   brand: string;
   translatePage: string;
   restorePage: string;
+  retranslatePage?: string;
   displayReplace: string;
   displayBilingual: string;
   targetLabel: string;
+  modelLabel?: string;
   alwaysSite: string;
   openTyped: string;
   openOptions: string;
@@ -67,6 +70,13 @@ export interface FloatingMenuLabels {
   pageProgress: (done: number, total: number) => string;
   pageCached?: (cached: number, done: number) => string;
   serverError?: string;
+}
+
+export interface FloatingMenuProbeStatus {
+  active: boolean;
+  ok?: boolean;
+  text: string;
+  detail?: string;
 }
 
 export interface FloatingMenuState {
@@ -79,6 +89,8 @@ export interface FloatingMenuState {
   targetLanguage: TargetLanguage;
   serverFault?: boolean;
   cached?: number;
+  localServerModel?: string;
+  probeStatus?: FloatingMenuProbeStatus | null;
 }
 
 export interface FloatingMenuPreferences {
@@ -89,6 +101,8 @@ export interface FloatingMenuPreferences {
 
 export interface FloatingMenuCallbacks {
   onTogglePage: () => void;
+  onRetranslate?: () => void;
+  onSelectModel?: (modelId: string) => void;
   onToggleBilingual: () => void;
   onChangeTarget: (language: TargetLanguage) => void;
   onToggleAlways: (always: boolean) => void;
@@ -337,6 +351,82 @@ const FAB_STYLE = `
   cursor: pointer;
   text-align: center;
 }
+.btn.full {
+  width: 100%;
+}
+.model-box {
+  display: grid;
+  gap: 6px;
+}
+.model-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.model-current {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text);
+}
+.model-pills {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.model-pill {
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: center;
+}
+.model-pill[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-contrast);
+  border-color: transparent;
+}
+.probe-status {
+  display: grid;
+  gap: 3px;
+  padding: 7px 9px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 11px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+.probe-status[hidden] {
+  display: none;
+}
+.probe-status[data-state="ok"] {
+  border-color: rgba(15, 118, 110, 0.35);
+}
+.probe-status[data-state="error"] {
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #dc2626;
+}
+.probe-main {
+  font-weight: 600;
+}
+.probe-detail {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10.5px;
+}
+.probe-detail[hidden] {
+  display: none;
+}
 .field {
   display: grid;
   gap: 4px;
@@ -415,6 +505,13 @@ export class FloatingMenuController {
   private faultBannerEl: HTMLDivElement | null = null;
   private faultTextEl: HTMLSpanElement | null = null;
   private faultOptionsBtn: HTMLButtonElement | null = null;
+  private retranslateBtn: HTMLButtonElement | null = null;
+  private modelLabelEl: HTMLSpanElement | null = null;
+  private modelCurrentEl: HTMLSpanElement | null = null;
+  private modelPillBtns: Map<string, HTMLButtonElement> = new Map();
+  private probeStatusEl: HTMLDivElement | null = null;
+  private probeMainEl: HTMLSpanElement | null = null;
+  private probeDetailEl: HTMLSpanElement | null = null;
   private displayBtn: HTMLButtonElement | null = null;
   private typedBtn: HTMLButtonElement | null = null;
   private targetLabelEl: HTMLSpanElement | null = null;
@@ -568,6 +665,16 @@ export class FloatingMenuController {
     });
     faultBanner.append(faultText, faultOptionsBtn);
 
+    const retranslateBtn = this.doc.createElement('button');
+    retranslateBtn.type = 'button';
+    retranslateBtn.className = 'btn full';
+    retranslateBtn.setAttribute('data-sakutto-fab', 'retranslate');
+    retranslateBtn.addEventListener('click', () => {
+      this.callbacks.onRetranslate?.();
+      this.ensurePoll();
+      this.render();
+    });
+
     const row = this.doc.createElement('div');
     row.className = 'row';
     const displayBtn = this.doc.createElement('button');
@@ -587,6 +694,50 @@ export class FloatingMenuController {
       this.callbacks.onOpenTyped();
     });
     row.append(displayBtn, typedBtn);
+
+    const modelBox = this.doc.createElement('div');
+    modelBox.className = 'model-box';
+    modelBox.setAttribute('data-sakutto-fab', 'model-section');
+    const modelHeader = this.doc.createElement('div');
+    modelHeader.className = 'model-header';
+    const modelLabel = this.doc.createElement('span');
+    const modelCurrent = this.doc.createElement('span');
+    modelCurrent.className = 'model-current';
+    modelHeader.append(modelLabel, modelCurrent);
+
+    const modelPills = this.doc.createElement('div');
+    modelPills.className = 'model-pills';
+    modelPills.setAttribute('data-sakutto-fab', 'model-pills');
+    this.modelPillBtns.clear();
+    for (const modelId of FASTFLOWLM_PLAMO_MODELS) {
+      const pill = this.doc.createElement('button');
+      pill.type = 'button';
+      pill.className = 'model-pill';
+      pill.setAttribute('data-sakutto-fab-model', modelId);
+      const shortTag = modelId.split(':')[1]?.toUpperCase() ?? modelId;
+      pill.textContent = shortTag;
+      pill.addEventListener('click', () => {
+        this.callbacks.onSelectModel?.(modelId);
+        this.ensurePoll();
+        this.render();
+      });
+      this.modelPillBtns.set(modelId, pill);
+      modelPills.appendChild(pill);
+    }
+
+    const probeStatus = this.doc.createElement('div');
+    probeStatus.className = 'probe-status';
+    probeStatus.setAttribute('role', 'status');
+    probeStatus.setAttribute('data-sakutto-fab', 'model-probe-status');
+    probeStatus.hidden = true;
+    const probeMain = this.doc.createElement('span');
+    probeMain.className = 'probe-main';
+    const probeDetail = this.doc.createElement('span');
+    probeDetail.className = 'probe-detail';
+    probeDetail.hidden = true;
+    probeStatus.append(probeMain, probeDetail);
+
+    modelBox.append(modelHeader, modelPills, probeStatus);
 
     const targetField = this.doc.createElement('label');
     targetField.className = 'field';
@@ -632,7 +783,18 @@ export class FloatingMenuController {
     });
     footer.append(optionsBtn, hideBtn);
 
-    sheet.append(header, primaryBtn, statusEl, faultBanner, row, targetField, alwaysLabel, footer);
+    sheet.append(
+      header,
+      primaryBtn,
+      statusEl,
+      faultBanner,
+      retranslateBtn,
+      row,
+      modelBox,
+      targetField,
+      alwaysLabel,
+      footer,
+    );
     shadow.append(fab, sheet);
 
     fab.addEventListener('pointerdown', this.onPointerDown);
@@ -659,6 +821,12 @@ export class FloatingMenuController {
     this.faultBannerEl = faultBanner;
     this.faultTextEl = faultText;
     this.faultOptionsBtn = faultOptionsBtn;
+    this.retranslateBtn = retranslateBtn;
+    this.modelLabelEl = modelLabel;
+    this.modelCurrentEl = modelCurrent;
+    this.probeStatusEl = probeStatus;
+    this.probeMainEl = probeMain;
+    this.probeDetailEl = probeDetail;
     this.displayBtn = displayBtn;
     this.typedBtn = typedBtn;
     this.targetLabelEl = targetLabel;
@@ -696,6 +864,13 @@ export class FloatingMenuController {
     this.faultBannerEl = null;
     this.faultTextEl = null;
     this.faultOptionsBtn = null;
+    this.retranslateBtn = null;
+    this.modelLabelEl = null;
+    this.modelCurrentEl = null;
+    this.modelPillBtns.clear();
+    this.probeStatusEl = null;
+    this.probeMainEl = null;
+    this.probeDetailEl = null;
     this.displayBtn = null;
     this.typedBtn = null;
     this.targetLabelEl = null;
@@ -874,6 +1049,48 @@ export class FloatingMenuController {
         this.faultBannerEl.hidden = false;
       } else {
         this.faultBannerEl.hidden = true;
+      }
+    }
+
+    if (this.retranslateBtn) {
+      const ja = this.prefs.uiLanguage.toLowerCase().startsWith('ja');
+      this.retranslateBtn.textContent =
+        this.labels.retranslatePage ??
+        (ja ? '再翻訳（キャッシュ更新）' : 'Retranslate (refresh cache)');
+      this.retranslateBtn.hidden = !state.active;
+    }
+
+    if (this.modelLabelEl) {
+      const ja = this.prefs.uiLanguage.toLowerCase().startsWith('ja');
+      this.modelLabelEl.textContent = this.labels.modelLabel ?? (ja ? 'モデル' : 'Model');
+    }
+    if (this.modelCurrentEl) {
+      this.modelCurrentEl.textContent = state.localServerModel || 'plamo3-translate:2b';
+    }
+    for (const [modelId, pill] of this.modelPillBtns.entries()) {
+      pill.setAttribute(
+        'aria-pressed',
+        (state.localServerModel || 'plamo3-translate:2b') === modelId ? 'true' : 'false',
+      );
+    }
+
+    if (this.probeStatusEl && this.probeMainEl && this.probeDetailEl) {
+      const probe = state.probeStatus;
+      if (probe && probe.text.length > 0) {
+        this.probeMainEl.textContent = probe.text;
+        if (probe.detail && probe.detail.length > 0) {
+          this.probeDetailEl.textContent = probe.detail;
+          this.probeDetailEl.hidden = false;
+        } else {
+          this.probeDetailEl.hidden = true;
+        }
+        this.probeStatusEl.setAttribute(
+          'data-state',
+          probe.active ? 'running' : probe.ok === false ? 'error' : 'ok',
+        );
+        this.probeStatusEl.hidden = false;
+      } else {
+        this.probeStatusEl.hidden = true;
       }
     }
 

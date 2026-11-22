@@ -155,6 +155,8 @@ export default defineBackground(() => {
         stopKeepalive();
         activeController.abort();
       });
+      // Receiving periodic pings from the content script resets Firefox MV3's 30s event-page idle timer.
+      port.onMessage.addListener(() => undefined);
       const rawModel = port.name.slice(LOCAL_SERVER_PROBE_PORT_PREFIX.length).trim();
       const requestedModel = rawModel.length > 0 ? rawModel : undefined;
       void (async () => {

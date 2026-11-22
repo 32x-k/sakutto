@@ -679,8 +679,18 @@ export function contentMain(): void {
       let latestProbeText = '';
       const fmtSec = (ms: number): string => `${(ms / 1000).toFixed(2)}s`;
 
+      let lastPingAt = startedAt;
       const updateRunningLabel = (): void => {
-        const sec = fmtSec(Math.max(0, Math.round(performance.now() - startedAt)));
+        const now = performance.now();
+        if (activeProbePort && now - lastPingAt >= 10_000) {
+          lastPingAt = now;
+          try {
+            activeProbePort.postMessage({ type: 'ping' });
+          } catch {
+            // Port closed; ignore.
+          }
+        }
+        const sec = fmtSec(Math.max(0, Math.round(now - startedAt)));
         if (latestStage === 'models') {
           liveProbeStatus = {
             active: true,

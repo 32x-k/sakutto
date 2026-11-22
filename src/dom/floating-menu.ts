@@ -65,6 +65,7 @@ export interface FloatingMenuLabels {
   close: string;
   pageTranslated: string;
   pageProgress: (done: number, total: number) => string;
+  pageCached?: (cached: number, done: number) => string;
   serverError?: string;
 }
 
@@ -77,6 +78,7 @@ export interface FloatingMenuState {
   auto: SiteAuto;
   targetLanguage: TargetLanguage;
   serverFault?: boolean;
+  cached?: number;
 }
 
 export interface FloatingMenuPreferences {
@@ -848,11 +850,17 @@ export class FloatingMenuController {
     }
 
     if (this.statusEl) {
+      const cachedCount = state.cached ?? 0;
+      const doneCount = Math.floor(state.done);
+      const cacheSuffix =
+        cachedCount > 0 && doneCount > 0 && this.labels.pageCached
+          ? ` (${this.labels.pageCached(cachedCount, doneCount)})`
+          : '';
       if (progressing) {
-        this.statusEl.textContent = this.labels.pageProgress(state.done, state.total);
+        this.statusEl.textContent = `${this.labels.pageProgress(state.done, state.total)}${cacheSuffix}`;
         this.statusEl.hidden = false;
       } else if (state.active && state.pending === 0 && !fault) {
-        this.statusEl.textContent = this.labels.pageTranslated;
+        this.statusEl.textContent = `${this.labels.pageTranslated}${cacheSuffix}`;
         this.statusEl.hidden = false;
       } else {
         this.statusEl.hidden = true;

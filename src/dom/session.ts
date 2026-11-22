@@ -106,6 +106,14 @@ const SELECTION_SETTLE_MS = 48;
 const POINTER_RELEASE_WINDOW_MS = 80;
 /** Selections larger than this bound skip the already-translated check and prefetch. */
 const MAX_SELECTION_SCAN_NODES = 512;
+/** Attributes toggled by accordions, tabs, `<details>`, and disclosure widgets without DOM insertion. */
+const DISCLOSURE_ATTRIBUTES = [
+  'open',
+  'hidden',
+  'aria-hidden',
+  'aria-expanded',
+  'data-state',
+] as const;
 /**
  * Defensive deduplication for duplicate native command delivery. Toggle would otherwise
  * translate and immediately restore, which looks like the shortcut doing nothing.
@@ -177,6 +185,8 @@ export interface PageViewState {
   skipped: number;
   /** True when the active local-server translation hit a connection/server error. */
   serverFault?: boolean;
+  /** Number of completed page blocks served from the local translation cache. */
+  cached?: number;
 }
 
 type LiveState = 'idle' | 'queued' | 'running' | 'done';
@@ -207,6 +217,7 @@ interface Live {
   partText: string[];
   partFinal: boolean[];
   partError: boolean[];
+  partCached?: boolean[];
   rect: DOMRect | null;
   batchToken: number;
   /** Selection only: normalized source, its model input, and the break map. */
@@ -423,6 +434,7 @@ export class PageSession {
   private readonly onResize: () => void;
   private readonly onSelectionChange: () => void;
   private readonly onPointerUp: () => void;
+  private readonly onDisclosureInteraction: (event: Event) => void;
   private lastShortcutCommand: 'toggle' | 'bilingual' | 'selection' | null = null;
   private lastShortcutAt = 0;
 
@@ -521,6 +533,14 @@ export class PageSession {
       this.pointerDown = false;
       this.pointerReleasedAt = performance.now();
       this.scheduleSelectionOffer(0);
+    };
+    this.onDisclosureInteraction = (event) => {
+      if (!this.active || this.applying > 0) return;
+      const target = event.target;
+      if (target instanceof Node && (this.overlay.contains(target) || this.isOwnNode(target))) {
+        return;
+      }
+      this.scheduleScan();
     };
     this.onSelectionChange = () => {
       if (this.pointerDown) return;
@@ -691,6 +711,15 @@ export class PageSession {
       segmentsPerSecond: rates.segmentsPerSecond,
       skipped: this.active ? this.skippedProse() : 0,
       serverFault: this.active && this.serverFault,
+      cached: this.active
+        ? tracked.filter(
+            (item) =>
+              item.state === 'done' &&
+              item.partCached !== undefined &&
+              item.partCached.length > 0 &&
+              item.partCached.every(Boolean),
+          ).length
+        : 0,
     };
   }
 
@@ -1558,6 +1587,8 @@ export class PageSession {
         if (chunk.final !== undefined) {
           item.partText[index] = chunk.final;
           item.partFinal[index] = true;
+          item.partCached ??= [];
+          item.partCached[index] = chunk.cached === true;
           if (chunk.error === true) item.partError[index] = true;
           if (item.partFinal.every(Boolean)) {
             if (item.partError.length > 0 && item.partError.every(Boolean)) {
@@ -2154,8 +2185,14 @@ export class PageSession {
         : view.skipped > 0
           ? this.labels.barPartial(view.skipped)
           : this.labels.barDone;
-    if (view.tokensPerSecond === null || view.segmentsPerSecond === null) return base;
-    return `${base} · ${this.labels.barRate(formatRate(view.tokensPerSecond), formatRate(view.segmentsPerSecond))}`;
+    const cachedCount = view.cached ?? 0;
+    const doneCount = Math.floor(view.done);
+    const withCache =
+      cachedCount > 0 && doneCount > 0 && this.labels.barCached
+        ? `${base} · ${this.labels.barCached(cachedCount, doneCount)}`
+        : base;
+    if (view.tokensPerSecond === null || view.segmentsPerSecond === null) return withCache;
+    return `${withCache} · ${this.labels.barRate(formatRate(view.tokensPerSecond), formatRate(view.segmentsPerSecond))}`;
   }
 
   private noteLiveRate(): void {
@@ -2277,6 +2314,11 @@ export class PageSession {
     const stale = new Set<Element>();
 
     for (const record of records) {
+      if (record.type === 'attributes') {
+        if (this.isOwnNode(record.target)) continue;
+        external = true;
+        continue;
+      }
       if (record.type === 'characterData') {
         if (this.isExpectedText(record.target)) continue;
         external = true;
@@ -2450,7 +2492,13 @@ export class PageSession {
       if (this.observedRoots.has(root)) continue;
       try {
         const observer = new MutationObserver((records) => this.onMutations(records));
-        observer.observe(root, { childList: true, subtree: true, characterData: true });
+        observer.observe(root, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+          attributes: true,
+          attributeFilter: [...DISCLOSURE_ATTRIBUTES],
+        });
         this.observedRoots.set(root, observer);
         this.observers.push(observer);
       } catch {
@@ -2510,6 +2558,8 @@ export class PageSession {
     root.addEventListener('pointerdown', this.onPointerDown);
     root.addEventListener('pointerup', this.onPointerUp);
     root.addEventListener('pointercancel', this.onPointerUp);
+    root.addEventListener('click', this.onDisclosureInteraction);
+    root.addEventListener('toggle', this.onDisclosureInteraction, true);
     if (isSelectionRoot(root)) root.addEventListener('selectionchange', this.onSelectionChange);
     this.pointerRoots.add(root);
   }
@@ -2539,6 +2589,8 @@ export class PageSession {
       root.removeEventListener('pointerdown', this.onPointerDown);
       root.removeEventListener('pointerup', this.onPointerUp);
       root.removeEventListener('pointercancel', this.onPointerUp);
+      root.removeEventListener('click', this.onDisclosureInteraction);
+      root.removeEventListener('toggle', this.onDisclosureInteraction, true);
       if (isSelectionRoot(root)) {
         root.removeEventListener('selectionchange', this.onSelectionChange);
       }

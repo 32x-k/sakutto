@@ -57,7 +57,7 @@ export class CachingEngine implements IdentifiedEngine {
       if (!bypass) {
         const hit = await this.cache.get(key);
         if (hit && this.accepts(hit.text, segment.text, options)) {
-          yield { id: segment.id, final: hit.text, engine: hit.engine };
+          yield { id: segment.id, final: hit.text, engine: hit.engine, cached: true };
           continue;
         }
       }

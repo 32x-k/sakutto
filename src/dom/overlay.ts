@@ -157,6 +157,8 @@ export interface OverlayLabels {
   barProgress: (done: number, total: number) => string;
   barRate: (tokens: string, segments: string) => string;
   barDone: string;
+  /** Optional suffix/formatter when some or all completed blocks came from the cache. */
+  barCached?: (cached: number, done: number) => string;
   /** Shown when some source prose had no translatable segment. */
   barPartial: (blocks: number) => string;
   barOriginal: string;

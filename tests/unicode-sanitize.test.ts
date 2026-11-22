@@ -808,7 +808,7 @@ describe('cache, captions, typed input, cleanModelOutput', () => {
       engine.translate([{ id: 'b', text: `Hello${ISSUE_73_HIDDEN} world.` }], options()),
     );
     expect(inner.calls).toBe(1);
-    expect(second).toEqual([{ id: 'b', final: '訳:Hello world.', engine: 'plamo' }]);
+    expect(second).toEqual([{ id: 'b', final: '訳:Hello world.', engine: 'plamo', cached: true }]);
   });
 
   it('strips joiners from caption text and skips an invisible-only cue', async () => {

@@ -137,7 +137,7 @@ describe('CachingEngine', () => {
     expect(first).toEqual([{ id: 'a', final: 'サインイン', engine: 'plamo' }]);
 
     const second = await collectChunks(engine.translate(segments, options()));
-    expect(second).toEqual([{ id: 'a', final: 'サインイン', engine: 'plamo' }]);
+    expect(second).toEqual([{ id: 'a', final: 'サインイン', engine: 'plamo', cached: true }]);
     expect(inner.calls).toBe(1);
   });
 
@@ -166,7 +166,7 @@ describe('CachingEngine', () => {
     );
 
     expect(chunks).toEqual([
-      { id: 'a', final: '簡易訳', engine: 'chrome' },
+      { id: 'a', final: '簡易訳', engine: 'chrome', cached: true },
       { id: 'b', final: '設定', engine: 'plamo' },
     ]);
     expect(inner.calls).toBe(1);

@@ -14,7 +14,7 @@
   } from '@/dom/sites';
   import type { EngineCapabilities } from '@/shared/capabilities';
   import type { EngineStatus } from '@/shared/engine-status';
-  import { hasBuiltInTranslatorUi, isFirefoxBuild } from '@/shared/browser';
+  import { hasBuiltInTranslatorUi, isAndroidPlatform, isFirefoxBuild } from '@/shared/browser';
   import { openOrFocusExtensionTab } from '@/shared/extension-tabs';
   import { currentUiLanguage, t, tForBrowser } from '@/shared/i18n';
   import {
@@ -37,12 +37,12 @@
   import GpuDiagnosticView from '@/ui/GpuDiagnostic.svelte';
   import LanguageField from '@/ui/LanguageField.svelte';
   import GlossaryEditor from '@/ui/GlossaryEditor.svelte';
-  import ModelFolderSettings from '@/ui/ModelFolderSettings.svelte';
-  import ModelManager from '@/ui/ModelManager.svelte';
   import { runtimeLabel } from '@/ui/runtime-label';
   import SettingsFields from '@/ui/SettingsFields.svelte';
   import ShortcutSettings from '@/ui/ShortcutSettings.svelte';
   import LocalServerSettings from '@/ui/LocalServerSettings.svelte';
+
+  const android = isAndroidPlatform();
 
   type SettingsError = 'load' | 'save' | null;
   type CacheState = 'cleared' | 'failed' | null;
@@ -291,141 +291,6 @@
     {/if}
   </section>
 
-  <section class="panel">
-    <h2>{t('shortcutHeading')}</h2>
-    <p class="muted help">{t(isFirefoxBuild() ? 'shortcutHelpFirefox' : 'shortcutHelp')}</p>
-    <p class="muted help">{t('composeHelp')}</p>
-    <ShortcutSettings
-      enabled={settings?.shortcutsEnabled}
-      onToggle={(command, on) => {
-        void updateSettings({ shortcutsEnabled: { [command]: on } });
-      }}
-    />
-  </section>
-
-  <section class="panel">
-    <h2>{t('siteRulesHeading')}</h2>
-    <p class="muted help">{t('optionsSiteLive')}</p>
-    {#if siteList.length === 0}
-      <p class="muted">{t('noSiteRules')}</p>
-    {:else}
-      <ul class="sites">
-        {#each siteList as rule (rule.host)}
-          <li>
-            <span class="site-host">{rule.host}</span>
-            <div class="site-controls">
-              <LanguageField
-                value={rule.targetLanguage ?? settings?.targetLanguage ?? 'en'}
-                {uiLanguage}
-                onChange={(language: TargetLanguage) => {
-                  void patchSite(rule.host, { targetLanguage: language });
-                }}
-              />
-              <label class="field">
-                <span>{t('displayLabel')}</span>
-                <select
-                  aria-label={`${rule.host} ${t('displayLabel')}`}
-                  value={rule.display ?? settings?.display ?? 'replace'}
-                  onchange={(event) => {
-                    const select = event.currentTarget as HTMLSelectElement;
-                    void patchSite(rule.host, {
-                      display: select.value === 'bilingual' ? 'bilingual' : 'replace',
-                    });
-                  }}
-                >
-                  <option value="replace">{t('displayReplace')}</option>
-                  <option value="bilingual">{t('displayBilingual')}</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>{t('siteRulesHeading')}</span>
-                <select
-                  aria-label={`${rule.host} ${t('siteRulesHeading')}`}
-                  value={rule.auto}
-                  onchange={(event) => {
-                    const select = event.currentTarget as HTMLSelectElement;
-                    const auto =
-                      select.value === 'always' || select.value === 'never' ? select.value : 'ask';
-                    void changeAuto(rule.host, auto);
-                  }}
-                >
-                  <option value="ask">{t('siteRuleAsk')}</option>
-                  <option value="always">{t('siteRuleAlways')}</option>
-                  <option value="never">{t('siteRuleNever')}</option>
-                </select>
-              </label>
-              <button
-                class="button secondary site-remove"
-                type="button"
-                aria-label={`${rule.host} ${t('siteRuleRemove')}`}
-                onclick={() => {
-                  void removeSite(rule.host);
-                }}
-              >
-                {t('siteRuleRemove')}
-              </button>
-            </div>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-    {#if permissionError}
-      <p class="error" role="alert">{t('errorPermission')}</p>
-    {/if}
-    <form
-      class="add-site"
-      onsubmit={(event) => {
-        event.preventDefault();
-        void addSite();
-      }}
-    >
-      <label>
-        <span>{t('siteHostLabel')}</span>
-        <input bind:value={hostInput} autocomplete="off" spellcheck="false" />
-      </label>
-      <button class="button secondary" type="submit">{t('glossaryAddSite')}</button>
-    </form>
-    {#if hostError}
-      <p class="error" role="alert">{t('siteHostInvalid')}</p>
-    {/if}
-  </section>
-
-  <section class="panel">
-    <h2>{t('glossaryHeading')}</h2>
-    <p id="glossary-help" class="muted help">{t('glossaryHelp')}</p>
-    <label class="field">
-      <span>{t('glossaryScopeLabel')}</span>
-      <select bind:value={glossaryScope}>
-        <option value="global">{t('glossaryGlobal')}</option>
-        {#each siteList as rule (rule.host)}
-          <option value={rule.host}>{rule.host}</option>
-        {/each}
-      </select>
-    </label>
-    <GlossaryEditor
-      entries={glossaryEntries}
-      describedBy="glossary-help"
-      onChange={(entries) => void saveGlossary(entries)}
-    />
-  </section>
-
-  <section class="panel">
-    <h2>{t('modelHeading')}</h2>
-    <ModelManager />
-    <ModelFolderSettings />
-    {#if showSlow}
-      <p class="muted help">{t('slowDeviceHint')}</p>
-    {/if}
-    <div class="cache-row">
-      <button class="button secondary" type="button" onclick={clearCache}>{t('cacheClear')}</button>
-      {#if cacheState === 'cleared'}
-        <p class="muted" role="status">{t('cacheCleared')}</p>
-      {:else if cacheState === 'failed'}
-        <p class="error" role="alert">{t('cacheClearFailed')}</p>
-      {/if}
-    </div>
-  </section>
-
   <section class="panel" id="engine-settings">
     <h2>{t('engineHeading')}</h2>
     {#if settings}
@@ -460,123 +325,281 @@
         {/snippet}
       </LocalServerSettings>
     {/if}
-    <h3>{t('diagHeading')}</h3>
-    {#if settings?.engineSource === 'local-server'}
-      <dl class="diag">
-        <div>
-          <dt>{t('diagBackend')}</dt>
-          <dd>{t('diagBackendLocalServer')}</dd>
-        </div>
-        <div>
-          <dt>{t('diagConcurrent')}</dt>
-          <dd>
-            {engine?.engineSource === 'local-server'
-              ? (engine.parallel ?? settings.localServerParallel)
-              : settings.localServerParallel}
-          </dd>
-        </div>
-      </dl>
-    {:else}
-      <dl class="diag">
-        <div>
-          <dt>{t('diagRuntime')}</dt>
-          <dd>{engineLine}</dd>
-        </div>
-        <div>
-          <dt>{t('diagBackend')}</dt>
-          <dd>
-            {engine?.backend === 'webgpu'
-              ? t('diagBackendGpu')
-              : engine?.backend === 'cpu-wasm'
-                ? t('diagBackendCpu')
-                : t('diagBackendUnknown')}
-          </dd>
-        </div>
-        <div>
-          <dt>{t('diagThreads')}</dt>
-          <dd>{engine?.threads ?? '—'}</dd>
-        </div>
-        <div>
-          <dt>{t('diagParallel')}</dt>
-          <dd>{engine?.parallel ?? '—'}</dd>
-        </div>
-      </dl>
-      <p class="muted help">{t('diagRateHint')}</p>
-      <EngineStatusView {capabilities} failed={capabilitiesFailed} detailed />
-      <GpuDiagnosticView diagnostic={engine?.gpuDiagnostic} />
+    {#if showSlow}
+      <p class="muted help">{t('slowDeviceHint')}</p>
     {/if}
-  </section>
-
-  <section class="panel">
-    <h2>{t('privacyHeading')}</h2>
-    <p>{t('privacyBody')}</p>
-    <p class="muted">{t('privacyBodyLocalServer')}</p>
-    <p class="muted">{tForBrowser('privacyDestinations', 'privacyDestinationsFirefox')}</p>
-    <ul class="links">
-      <li>
-        <a href={projectLinks.privacy} target="_blank" rel="noreferrer">{t('privacyPolicyLink')}</a>
-      </li>
-      <li>
-        <a href={projectLinks.source} target="_blank" rel="noreferrer">{t('sourceCodeLink')}</a>
-      </li>
-    </ul>
-  </section>
-
-  <section class="panel">
-    <h2>{t('licensesHeading')}</h2>
-    <p>{t('licensesBody')}</p>
-    <h3>{t('onboardingCommercialHeading')}</h3>
-    <div class="terms">
-      <div>
-        <h4>{t('onboardingPersonalHeading')}</h4>
-        <p class="muted">{t('onboardingPersonalBody')}</p>
-      </div>
-      <div>
-        <h4>{t('onboardingCommercialHeading2')}</h4>
-        <p class="muted">{t('onboardingCommercialBody')}</p>
-        <ul class="conditions">
-          <li>{t('onboardingCommercialRegistration')}</li>
-          <li>{t('onboardingCommercialRevenue')}</li>
-        </ul>
-      </div>
-      <div>
-        <h4>{t('onboardingCommercialUnmetHeading')}</h4>
-        <p class="muted">{t('onboardingCommercialUnmetBody')}</p>
-      </div>
+    <div class="cache-row">
+      <button class="button secondary" type="button" onclick={clearCache}>{t('cacheClear')}</button>
+      {#if cacheState === 'cleared'}
+        <p class="muted" role="status">{t('cacheCleared')}</p>
+      {:else if cacheState === 'failed'}
+        <p class="error" role="alert">{t('cacheClearFailed')}</p>
+      {/if}
     </div>
-    <p class="muted">{t('onboardingAgeNotice')}</p>
-    <details class="more">
-      <summary>{t('onboardingOtherLicenses')}</summary>
+    <details class="more diag-details">
+      <summary>{t('diagHeading')}</summary>
+      {#if settings?.engineSource === 'local-server'}
+        <dl class="diag">
+          <div>
+            <dt>{t('diagBackend')}</dt>
+            <dd>{t('diagBackendLocalServer')}</dd>
+          </div>
+          <div>
+            <dt>{t('diagConcurrent')}</dt>
+            <dd>
+              {engine?.engineSource === 'local-server'
+                ? (engine.parallel ?? settings.localServerParallel)
+                : settings.localServerParallel}
+            </dd>
+          </div>
+        </dl>
+      {:else}
+        <dl class="diag">
+          <div>
+            <dt>{t('diagRuntime')}</dt>
+            <dd>{engineLine}</dd>
+          </div>
+          <div>
+            <dt>{t('diagBackend')}</dt>
+            <dd>
+              {engine?.backend === 'webgpu'
+                ? t('diagBackendGpu')
+                : engine?.backend === 'cpu-wasm'
+                  ? t('diagBackendCpu')
+                  : t('diagBackendUnknown')}
+            </dd>
+          </div>
+          <div>
+            <dt>{t('diagThreads')}</dt>
+            <dd>{engine?.threads ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>{t('diagParallel')}</dt>
+            <dd>{engine?.parallel ?? '—'}</dd>
+          </div>
+        </dl>
+        <p class="muted help">{t('diagRateHint')}</p>
+        <EngineStatusView {capabilities} failed={capabilitiesFailed} detailed />
+        <GpuDiagnosticView diagnostic={engine?.gpuDiagnostic} />
+      {/if}
+    </details>
+  </section>
+
+  {#if !android}
+    <details class="panel collapsible">
+      <summary class="panel-summary"><h2>{t('shortcutHeading')}</h2></summary>
+      <div class="collapsible-body">
+        <p class="muted help">{t(isFirefoxBuild() ? 'shortcutHelpFirefox' : 'shortcutHelp')}</p>
+        <p class="muted help">{t('composeHelp')}</p>
+        <ShortcutSettings
+          enabled={settings?.shortcutsEnabled}
+          onToggle={(command, on) => {
+            void updateSettings({ shortcutsEnabled: { [command]: on } });
+          }}
+        />
+      </div>
+    </details>
+  {/if}
+
+  <details class="panel collapsible" open={siteList.length > 0}>
+    <summary class="panel-summary">
+      <h2>{t('siteRulesHeading')}</h2>
+      {#if siteList.length > 0}
+        <span class="count-badge">{siteList.length}</span>
+      {/if}
+    </summary>
+    <div class="collapsible-body">
+      <p class="muted help">{t('optionsSiteLive')}</p>
+      {#if siteList.length === 0}
+        <p class="muted">{t('noSiteRules')}</p>
+      {:else}
+        <ul class="sites">
+          {#each siteList as rule (rule.host)}
+            <li>
+              <span class="site-host">{rule.host}</span>
+              <div class="site-controls">
+                <LanguageField
+                  value={rule.targetLanguage ?? settings?.targetLanguage ?? 'en'}
+                  {uiLanguage}
+                  onChange={(language: TargetLanguage) => {
+                    void patchSite(rule.host, { targetLanguage: language });
+                  }}
+                />
+                <label class="field">
+                  <span>{t('displayLabel')}</span>
+                  <select
+                    aria-label={`${rule.host} ${t('displayLabel')}`}
+                    value={rule.display ?? settings?.display ?? 'replace'}
+                    onchange={(event) => {
+                      const select = event.currentTarget as HTMLSelectElement;
+                      void patchSite(rule.host, {
+                        display: select.value === 'bilingual' ? 'bilingual' : 'replace',
+                      });
+                    }}
+                  >
+                    <option value="replace">{t('displayReplace')}</option>
+                    <option value="bilingual">{t('displayBilingual')}</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>{t('siteRulesHeading')}</span>
+                  <select
+                    aria-label={`${rule.host} ${t('siteRulesHeading')}`}
+                    value={rule.auto}
+                    onchange={(event) => {
+                      const select = event.currentTarget as HTMLSelectElement;
+                      const auto =
+                        select.value === 'always' || select.value === 'never'
+                          ? select.value
+                          : 'ask';
+                      void changeAuto(rule.host, auto);
+                    }}
+                  >
+                    <option value="ask">{t('siteRuleAsk')}</option>
+                    <option value="always">{t('siteRuleAlways')}</option>
+                    <option value="never">{t('siteRuleNever')}</option>
+                  </select>
+                </label>
+                <button
+                  class="button secondary site-remove"
+                  type="button"
+                  aria-label={`${rule.host} ${t('siteRuleRemove')}`}
+                  onclick={() => {
+                    void removeSite(rule.host);
+                  }}
+                >
+                  {t('siteRuleRemove')}
+                </button>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      {#if permissionError}
+        <p class="error" role="alert">{t('errorPermission')}</p>
+      {/if}
+      <form
+        class="add-site"
+        onsubmit={(event) => {
+          event.preventDefault();
+          void addSite();
+        }}
+      >
+        <label>
+          <span>{t('siteHostLabel')}</span>
+          <input bind:value={hostInput} autocomplete="off" spellcheck="false" />
+        </label>
+        <button class="button secondary" type="submit">{t('glossaryAddSite')}</button>
+      </form>
+      {#if hostError}
+        <p class="error" role="alert">{t('siteHostInvalid')}</p>
+      {/if}
+    </div>
+  </details>
+
+  <details class="panel collapsible" open={glossaryEntries.length > 0}>
+    <summary class="panel-summary">
+      <h2>{t('glossaryHeading')}</h2>
+      {#if glossaryEntries.length > 0}
+        <span class="count-badge">{glossaryEntries.length}</span>
+      {/if}
+    </summary>
+    <div class="collapsible-body">
+      <p id="glossary-help" class="muted help">{t('glossaryHelp')}</p>
+      <label class="field">
+        <span>{t('glossaryScopeLabel')}</span>
+        <select bind:value={glossaryScope}>
+          <option value="global">{t('glossaryGlobal')}</option>
+          {#each siteList as rule (rule.host)}
+            <option value={rule.host}>{rule.host}</option>
+          {/each}
+        </select>
+      </label>
+      <GlossaryEditor
+        entries={glossaryEntries}
+        describedBy="glossary-help"
+        onChange={(entries) => void saveGlossary(entries)}
+      />
+    </div>
+  </details>
+
+  <details class="panel collapsible">
+    <summary class="panel-summary">
+      <h2>{t('privacyHeading')} / {t('licensesHeading')}</h2>
+    </summary>
+    <div class="collapsible-body">
+      <h3>{t('privacyHeading')}</h3>
+      <p>{t('privacyBody')}</p>
+      <p class="muted">{t('privacyBodyLocalServer')}</p>
+      <p class="muted">{tForBrowser('privacyDestinations', 'privacyDestinationsFirefox')}</p>
       <ul class="links">
         <li>
-          <a href={officialLinks.licenseJa} target="_blank" rel="noreferrer"
-            >{t('plamoOfficialLicenseJa')}</a
+          <a href={projectLinks.privacy} target="_blank" rel="noreferrer"
+            >{t('privacyPolicyLink')}</a
           >
         </li>
         <li>
-          <a href={officialLinks.licenseEn} target="_blank" rel="noreferrer"
-            >{t('plamoOfficialLicenseEn')}</a
-          >
-        </li>
-        <li>
-          <a href={officialLinks.registration} target="_blank" rel="noreferrer"
-            >{t('plamoRegistrationLink')}</a
-          >
-        </li>
-        <li>
-          <a href={licenseLinks.plamoJa} target="_blank" rel="noreferrer">{t('licensePlaMoJa')}</a>
-        </li>
-        <li>
-          <a href={licenseLinks.plamoEn} target="_blank" rel="noreferrer">{t('licensePlaMoEn')}</a>
-        </li>
-        <li><a href={licenseLinks.mit} target="_blank" rel="noreferrer">{t('licenseMit')}</a></li>
-        <li>
-          <a href={licenseLinks.notice} target="_blank" rel="noreferrer">{t('licenseNotice')}</a>
+          <a href={projectLinks.source} target="_blank" rel="noreferrer">{t('sourceCodeLink')}</a>
         </li>
       </ul>
-    </details>
-    <p class="muted">{t('licenseModelNote')}</p>
-  </section>
+
+      <h3>{t('licensesHeading')}</h3>
+      <p>{t('licensesBody')}</p>
+      <h4>{t('onboardingCommercialHeading')}</h4>
+      <div class="terms">
+        <div>
+          <h4>{t('onboardingPersonalHeading')}</h4>
+          <p class="muted">{t('onboardingPersonalBody')}</p>
+        </div>
+        <div>
+          <h4>{t('onboardingCommercialHeading2')}</h4>
+          <p class="muted">{t('onboardingCommercialBody')}</p>
+          <ul class="conditions">
+            <li>{t('onboardingCommercialRegistration')}</li>
+            <li>{t('onboardingCommercialRevenue')}</li>
+          </ul>
+        </div>
+        <div>
+          <h4>{t('onboardingCommercialUnmetHeading')}</h4>
+          <p class="muted">{t('onboardingCommercialUnmetBody')}</p>
+        </div>
+      </div>
+      <p class="muted">{t('onboardingAgeNotice')}</p>
+      <details class="more">
+        <summary>{t('onboardingOtherLicenses')}</summary>
+        <ul class="links">
+          <li>
+            <a href={officialLinks.licenseJa} target="_blank" rel="noreferrer"
+              >{t('plamoOfficialLicenseJa')}</a
+            >
+          </li>
+          <li>
+            <a href={officialLinks.licenseEn} target="_blank" rel="noreferrer"
+              >{t('plamoOfficialLicenseEn')}</a
+            >
+          </li>
+          <li>
+            <a href={officialLinks.registration} target="_blank" rel="noreferrer"
+              >{t('plamoRegistrationLink')}</a
+            >
+          </li>
+          <li>
+            <a href={licenseLinks.plamoJa} target="_blank" rel="noreferrer">{t('licensePlaMoJa')}</a
+            >
+          </li>
+          <li>
+            <a href={licenseLinks.plamoEn} target="_blank" rel="noreferrer">{t('licensePlaMoEn')}</a
+            >
+          </li>
+          <li><a href={licenseLinks.mit} target="_blank" rel="noreferrer">{t('licenseMit')}</a></li>
+          <li>
+            <a href={licenseLinks.notice} target="_blank" rel="noreferrer">{t('licenseNotice')}</a>
+          </li>
+        </ul>
+      </details>
+      <p class="muted">{t('licenseModelNote')}</p>
+    </div>
+  </details>
 
   <div class="actions">
     <button class="button" type="button" onclick={openOnboarding}>{t('openOnboarding')}</button>
@@ -807,5 +830,44 @@
   .footer {
     display: grid;
     gap: var(--space-1);
+  }
+
+  .panel-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .panel-summary h2 {
+    margin: 0;
+  }
+
+  .collapsible-body {
+    display: grid;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
+  }
+
+  .count-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .diag-details > .diag {
+    margin-top: var(--space-2);
   }
 </style>

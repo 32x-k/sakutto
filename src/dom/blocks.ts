@@ -343,6 +343,7 @@ class VisibilityProbe {
     const value =
       (parent !== null && this.skipped(parent)) ||
       this.excluded(element) ||
+      element.hasAttribute('hidden') ||
       isAriaHiddenLeaf(element) ||
       isScreenReaderOnly(element) ||
       isCollapsedDetail(element) ||

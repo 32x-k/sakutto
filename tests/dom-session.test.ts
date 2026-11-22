@@ -4075,4 +4075,71 @@ describe('selection offers on a never host and at init', () => {
     session.offerExistingSelection();
     expect(icon().hidden).toBe(true);
   });
+
+  it('automatically translates accordion and disclosure content revealed via attribute change or click', async () => {
+    document.body.innerHTML = `
+      <div>
+        <h2>Does the agent persist data?</h2>
+        <div id="faq-panel" hidden>
+          <p id="faq-answer">Yes. Hermes stores conversations and skills across sessions.</p>
+        </div>
+      </div>
+    `;
+    const session = new PageSession(document, {
+      engine: immediate((source) => `訳:${source}`),
+      labels,
+      preferences: preferences(),
+      debounceMs: 5,
+      scheduleFrame: (callback) => callback(),
+    });
+    sessions.push(session);
+
+    await session.translate();
+    await session.whenIdle();
+
+    expect(document.querySelector('h2')?.textContent).toBe('訳:Does the agent persist data?');
+    expect(document.querySelector('#faq-answer')?.textContent).toBe(
+      'Yes. Hermes stores conversations and skills across sessions.',
+    );
+
+    const panel = document.querySelector('#faq-panel') as HTMLElement;
+    panel.removeAttribute('hidden');
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await session.whenIdle();
+
+    expect(document.querySelector('#faq-answer')?.textContent).toBe(
+      '訳:Yes. Hermes stores conversations and skills across sessions.',
+    );
+  });
+
+  it('reports cached block count in PageViewState and displays barCached on cache hits', async () => {
+    document.body.innerHTML = '<p id="p1">First block</p><p id="p2">Second block</p>';
+    const session = new PageSession(document, {
+      engine: engineOf(async function* (segments) {
+        for (const segment of segments) {
+          yield {
+            id: segment.id,
+            final: `訳:${segment.text}`,
+            engine: 'plamo',
+            cached: true,
+          };
+        }
+      }),
+      labels: {
+        ...labels,
+        barCached: (cached, done) =>
+          cached >= done ? 'キャッシュ' : `キャッシュ ${cached}/${done}`,
+      },
+      preferences: preferences(),
+      scheduleFrame: (callback) => callback(),
+    });
+    sessions.push(session);
+
+    await session.translate();
+    await session.whenIdle();
+
+    expect(session.state().cached).toBe(2);
+    const bar = document.querySelector('sakutto-bar');
+    expect(uiShadow(bar)?.textContent).toContain('キャッシュ');
+  });
 });

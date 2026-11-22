@@ -41,7 +41,8 @@ describe('start controls while the model downloads', () => {
     expect(popup).not.toContain('modelFolderOfferLater');
     expect(source('entrypoints/options/App.svelte')).not.toContain('SharedFolderOffer');
     expect(source('entrypoints/onboarding/App.svelte')).not.toContain('SharedFolderOffer');
-    expect(source('entrypoints/options/App.svelte')).toContain('ModelFolderSettings');
+    expect(source('entrypoints/options/App.svelte')).not.toContain('ModelFolderSettings');
+    expect(source('entrypoints/options/App.svelte')).not.toContain('ModelManager');
   });
 
   it('records license consent before linking a folder or starting the engine', () => {
@@ -716,9 +717,7 @@ describe('shared folder activation and recovery', () => {
 
   it('keeps the cache clear outside the storage choice', () => {
     expect(options).toContain('cache-row');
-    expect(options.indexOf('<ModelFolderSettings')).toBeLessThan(
-      options.indexOf('onclick={clearCache}'),
-    );
+    expect(options).toContain('onclick={clearCache}');
     expect(folderSettings).not.toContain('cacheClear');
   });
 

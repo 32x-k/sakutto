@@ -58,6 +58,8 @@ export type TranslationChunk =
        * left hanging; the caller must not cache it or treat it as a finished translation.
        */
       error?: boolean | undefined;
+      /** True when this segment was served directly from the translation cache. */
+      cached?: boolean | undefined;
     });
 
 export interface Engine {
@@ -83,6 +85,8 @@ export function isTranslationChunk(value: unknown): value is TranslationChunk {
   if (restart !== undefined && (typeof restart !== 'boolean' || delta === undefined)) return false;
   const error = 'error' in value ? value.error : undefined;
   if (error !== undefined && (typeof error !== 'boolean' || final === undefined)) return false;
+  const cached = 'cached' in value ? value.cached : undefined;
+  if (cached !== undefined && (typeof cached !== 'boolean' || final === undefined)) return false;
   const engine = 'engine' in value ? value.engine : undefined;
   return engine === undefined || engine === 'plamo' || engine === 'chrome';
 }

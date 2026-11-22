@@ -275,99 +275,6 @@
     </select>
   </label>
 
-  <label class="field">
-    <span>{t('paceLabel')}</span>
-    <select value={settings.pace} onchange={updatePace}>
-      <option value="quality">{t('paceQuality')}</option>
-      <option value="fast">{t('paceFast')}</option>
-    </select>
-  </label>
-  <p class="muted help">{tForBrowser('paceHelp', 'paceHelpFirefox')}</p>
-
-  <div class="field popup-size" data-sakutto="translation-popup-size">
-    <div class="field-heading">
-      <span>{t('translationPopupSizeLabel')}</span>
-      <span class="popup-size-value" aria-hidden="true">{popupPreviewSize}%</span>
-    </div>
-    <div class="popup-preview" aria-hidden="true">
-      <div class="popup-preview-card" style:font-size="{popupPreviewFontPx}px">
-        <p class="popup-preview-kicker">翻訳</p>
-        <p class="popup-preview-body">これは翻訳ポップアップのプレビューです。</p>
-        <p class="popup-preview-note">PLaMo</p>
-      </div>
-    </div>
-    <input
-      id="translation-popup-size-slider"
-      type="range"
-      min={TRANSLATION_POPUP_SIZE_MIN}
-      max={TRANSLATION_POPUP_SIZE_MAX}
-      step="1"
-      value={settings.translationPopupSize}
-      aria-label={t('translationPopupSizeLabel')}
-      data-sakutto="translation-popup-size-slider"
-      oninput={updateTranslationPopupSize}
-    />
-    <p class="muted help">{t('translationPopupSizeHelp')}</p>
-  </div>
-
-  <label class="field" data-sakutto="plain-text-line-breaks">
-    <span>{t('plainTextLineBreaksLabel')}</span>
-    <select value={settings.plainTextLineBreaks} onchange={updatePlainTextLineBreaks}>
-      <option value="none">{t('plainTextLineBreaksNone')}</option>
-      <option value="keep">{t('plainTextLineBreaksKeep')}</option>
-      <option value="blank">{t('plainTextLineBreaksBlank')}</option>
-      <option value="wider">{t('plainTextLineBreaksWider')}</option>
-    </select>
-  </label>
-  <p class="muted help">{t('plainTextLineBreaksHelp')}</p>
-
-  <label class="check">
-    <input
-      type="checkbox"
-      checked={settings.composeIcon}
-      onchange={(event) => {
-        const input = event.currentTarget as HTMLInputElement;
-        onChange({ composeIcon: input.checked });
-      }}
-    />
-    <span>{t('composeIconSetting')}</span>
-  </label>
-  <p class="muted help">{t('composeIconSettingHelp')}</p>
-
-  <label class="field">
-    <span>{t('composeTargetSetting')}</span>
-    <select value={settings.composeTargetLanguage ?? ''} onchange={updateComposeTarget}>
-      <option value="">{t('composeTargetAuto')}</option>
-      {#each [...SUPPORTED_LANGUAGES.slice(0, 1), JA_EASY_TARGET, ...SUPPORTED_LANGUAGES.slice(1)] as language (language)}
-        <option value={language}>{displayTargetLanguage(language, uiLanguage)}</option>
-      {/each}
-    </select>
-  </label>
-  <p class="muted help">{t('composeTargetSettingHelp')}</p>
-
-  <label class="check">
-    <input
-      type="checkbox"
-      checked={settings.composeInstantReplace}
-      onchange={(event) => {
-        const input = event.currentTarget as HTMLInputElement;
-        onChange({ composeInstantReplace: input.checked });
-      }}
-    />
-    <span>{t('composeInstantSetting')}</span>
-  </label>
-  <p class="muted help">{t('composeInstantSettingHelp')}</p>
-
-  <label class="field">
-    <span>{t('composePlacementSetting')}</span>
-    <select value={settings.composePlacement} onchange={updateComposePlacement}>
-      {#each COMPOSE_PLACEMENTS as placement (placement)}
-        <option value={placement}>{t(placementLabels[placement])}</option>
-      {/each}
-    </select>
-  </label>
-  <p class="muted help">{t('composePlacementSettingHelp')}</p>
-
   <label class="check">
     <input
       type="checkbox"
@@ -394,264 +301,369 @@
   </label>
   <p class="muted help">{t('floatingButtonHelp')}</p>
 
-  <label class="check">
-    <input
-      type="checkbox"
-      data-sakutto="gmail-banner"
-      checked={settings.gmailTranslateBanner}
-      onchange={(event) => {
-        const input = event.currentTarget as HTMLInputElement;
-        mailDenied = false;
-        void (async () => {
-          // User gesture: resolveMailBannerToggle must call permissions.request with no prior pause.
-          const result = await resolveMailBannerToggle(input.checked);
-          input.checked = result.on;
-          if (result.denied) {
-            mailDenied = true;
-            onPermissionDenied?.();
-            return;
-          }
-          onChange({ gmailTranslateBanner: result.on });
-        })();
-      }}
-    />
-    <span>{t('settingsGmailBanner')}</span>
-  </label>
-  {#if mailDenied}
-    <p class="error" role="alert" data-sakutto="mail-banner-denied">
-      {t('mailBannerPermissionDenied')}
-    </p>
-  {/if}
-  <p class="muted help">{t('settingsGmailBannerHelp')}</p>
+  <details
+    class="advanced-group"
+    open={settings.composeIcon || settings.gmailTranslateBanner || settings.translateVideoCaptions}
+  >
+    <summary class="advanced-summary">{t('localServerAdvanced')}</summary>
+    <div class="advanced-body">
+      <label class="field">
+        <span>{t('paceLabel')}</span>
+        <select value={settings.pace} onchange={updatePace}>
+          <option value="quality">{t('paceQuality')}</option>
+          <option value="fast">{t('paceFast')}</option>
+        </select>
+      </label>
+      <p class="muted help">{tForBrowser('paceHelp', 'paceHelpFirefox')}</p>
 
-  <div class="field gmail-languages" data-sakutto="gmail-auto-langs">
-    <div class="field-heading">
-      <span>{t('settingsGmailAutoLangs')}</span>
-      {#if settings.gmailAutoTranslateLangs.length > 0}
-        <button
-          type="button"
-          class="link-button"
-          data-sakutto="gmail-auto-langs-clear"
-          onclick={() => clearGmailLanguages('auto')}
-        >
-          {t('settingsGmailClearLangs')}
-        </button>
-      {/if}
-    </div>
-    {#if settings.gmailAutoTranslateLangs.length === 0}
-      <p class="muted help">{t('settingsGmailNoAutoLangs')}</p>
-    {:else}
-      <ul class="custom-host-list">
-        {#each settings.gmailAutoTranslateLangs as language (language)}
-          <li>
-            <span>{displayLanguage(language, uiLanguage)}</span>
-            <button
-              type="button"
-              data-sakutto="gmail-auto-lang-remove"
-              aria-label={`${t('settingsGmailRemoveLang')} ${displayLanguage(language, uiLanguage)}`}
-              onclick={() => removeGmailLanguage(language)}
-            >
-              {t('settingsGmailRemoveLang')}
-            </button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </div>
-
-  <div class="field gmail-languages" data-sakutto="gmail-never-langs">
-    <div class="field-heading">
-      <span>{t('settingsGmailNeverLangs')}</span>
-      {#if settings.gmailNeverTranslateLangs.length > 0}
-        <button
-          type="button"
-          class="link-button"
-          data-sakutto="gmail-never-langs-clear"
-          onclick={() => clearGmailLanguages('never')}
-        >
-          {t('settingsGmailClearLangs')}
-        </button>
-      {/if}
-    </div>
-    {#if settings.gmailNeverTranslateLangs.length === 0}
-      <p class="muted help">{t('settingsGmailNoNeverLangs')}</p>
-    {:else}
-      <ul class="custom-host-list">
-        {#each settings.gmailNeverTranslateLangs as language (language)}
-          <li>
-            <span>{displayLanguage(language, uiLanguage)}</span>
-            <button
-              type="button"
-              data-sakutto="gmail-never-lang-remove"
-              aria-label={`${t('settingsGmailRemoveLang')} ${displayLanguage(language, uiLanguage)}`}
-              onclick={() => removeGmailLanguage(language)}
-            >
-              {t('settingsGmailRemoveLang')}
-            </button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </div>
-
-  <label class="check">
-    <input
-      type="checkbox"
-      data-sakutto="video-captions"
-      checked={settings.translateVideoCaptions}
-      onchange={(event) => {
-        const input = event.currentTarget as HTMLInputElement;
-        captionDenied = false;
-        void (async () => {
-          // User gesture: resolveCaptionToggle must call permissions.request with no prior pause.
-          const result = await resolveCaptionToggle(input.checked);
-          input.checked = result.on;
-          if (result.denied) {
-            captionDenied = true;
-            onPermissionDenied?.();
-            return;
-          }
-          onChange({ translateVideoCaptions: result.on });
-        })();
-      }}
-    />
-    <span>{t('videoCaptionsSetting')}</span>
-  </label>
-  {#if captionDenied}
-    <p class="error" role="alert" data-sakutto="video-captions-denied">
-      {t('videoCaptionsPermissionDenied')}
-    </p>
-  {/if}
-  <p class="muted help">{t('videoCaptionsSettingHelp')}</p>
-
-  {#if settings.translateVideoCaptions}
-    <label class="check">
-      <input
-        type="checkbox"
-        data-sakutto="video-captions-original"
-        checked={settings.videoCaptionDisplay === 'bilingual'}
-        onchange={(event) => {
-          const input = event.currentTarget as HTMLInputElement;
-          onChange({ videoCaptionDisplay: input.checked ? 'bilingual' : 'replace' });
-        }}
-      />
-      <span>{t('videoCaptionsShowOriginalSetting')}</span>
-    </label>
-    <p class="muted help">{t('videoCaptionsDisplayHelp')}</p>
-
-    <label class="check">
-      <input
-        type="checkbox"
-        data-sakutto="video-captions-original-toggle"
-        checked={settings.videoCaptionOriginalToggle}
-        onchange={(event) => {
-          const input = event.currentTarget as HTMLInputElement;
-          onChange({ videoCaptionOriginalToggle: input.checked });
-        }}
-      />
-      <span>{t('videoCaptionsOriginalToggleSetting')}</span>
-    </label>
-    <p class="muted help">{t('videoCaptionsOriginalToggleHelp')}</p>
-
-    <div class="field caption-size" data-sakutto="video-captions-size">
-      <span>{t('videoCaptionsSizeLabel')}</span>
-      <div class="caption-preview" aria-hidden="true">
-        <div class="caption-preview-player">
-          <div class="caption-preview-lines" style:font-size="{previewFontPx}px">
-            <div class="caption-preview-original">The north window sells tickets.</div>
-            <div class="caption-preview-translation">北側窓口では切符を売っています。</div>
+      <div class="field popup-size" data-sakutto="translation-popup-size">
+        <div class="field-heading">
+          <span>{t('translationPopupSizeLabel')}</span>
+          <span class="popup-size-value" aria-hidden="true">{popupPreviewSize}%</span>
+        </div>
+        <div class="popup-preview" aria-hidden="true">
+          <div class="popup-preview-card" style:font-size="{popupPreviewFontPx}px">
+            <p class="popup-preview-kicker">翻訳</p>
+            <p class="popup-preview-body">これは翻訳ポップアップのプレビューです。</p>
+            <p class="popup-preview-note">PLaMo</p>
           </div>
         </div>
+        <input
+          id="translation-popup-size-slider"
+          type="range"
+          min={TRANSLATION_POPUP_SIZE_MIN}
+          max={TRANSLATION_POPUP_SIZE_MAX}
+          step="1"
+          value={settings.translationPopupSize}
+          aria-label={t('translationPopupSizeLabel')}
+          data-sakutto="translation-popup-size-slider"
+          oninput={updateTranslationPopupSize}
+        />
+        <p class="muted help">{t('translationPopupSizeHelp')}</p>
       </div>
-      <input
-        type="range"
-        min={VIDEO_CAPTION_SIZE_MIN}
-        max={VIDEO_CAPTION_SIZE_MAX}
-        step="1"
-        value={settings.videoCaptionSize}
-        aria-label={t('videoCaptionsSizeLabel')}
-        data-sakutto="video-captions-size-slider"
-        oninput={updateVideoCaptionSize}
-      />
-      <p class="muted help">{t('videoCaptionsSizeHelp')}</p>
-    </div>
 
-    <div class="field caption-position" data-sakutto="video-captions-position">
-      <button
-        type="button"
-        data-sakutto="video-captions-position-reset"
-        onclick={() => onChange({ videoCaptionPositions: {} })}
-      >
-        {t('videoCaptionsPositionReset')}
-      </button>
-      <p class="muted help">{t('videoCaptionsPositionHelp')}</p>
-    </div>
+      <label class="field" data-sakutto="plain-text-line-breaks">
+        <span>{t('plainTextLineBreaksLabel')}</span>
+        <select value={settings.plainTextLineBreaks} onchange={updatePlainTextLineBreaks}>
+          <option value="none">{t('plainTextLineBreaksNone')}</option>
+          <option value="keep">{t('plainTextLineBreaksKeep')}</option>
+          <option value="blank">{t('plainTextLineBreaksBlank')}</option>
+          <option value="wider">{t('plainTextLineBreaksWider')}</option>
+        </select>
+      </label>
+      <p class="muted help">{t('plainTextLineBreaksHelp')}</p>
 
-    <div class="field custom-hosts" data-sakutto="caption-custom-hosts">
-      <span>{t('videoCaptionsCustomSitesLabel')}</span>
-      <p class="muted help">{t('videoCaptionsCustomSitesHelp')}</p>
       <label class="check">
         <input
           type="checkbox"
-          data-sakutto="caption-custom-host-subdomains"
-          checked={customHostWildcard}
+          checked={settings.composeIcon}
           onchange={(event) => {
-            customHostWildcard = (event.currentTarget as HTMLInputElement).checked;
+            const input = event.currentTarget as HTMLInputElement;
+            onChange({ composeIcon: input.checked });
           }}
         />
-        <span>{t('videoCaptionsCustomHostSubdomains')}</span>
+        <span>{t('composeIconSetting')}</span>
       </label>
-      <div class="custom-host-row">
+      <p class="muted help">{t('composeIconSettingHelp')}</p>
+
+      {#if settings.composeIcon}
+        <label class="field">
+          <span>{t('composeTargetSetting')}</span>
+          <select value={settings.composeTargetLanguage ?? ''} onchange={updateComposeTarget}>
+            <option value="">{t('composeTargetAuto')}</option>
+            {#each [...SUPPORTED_LANGUAGES.slice(0, 1), JA_EASY_TARGET, ...SUPPORTED_LANGUAGES.slice(1)] as language (language)}
+              <option value={language}>{displayTargetLanguage(language, uiLanguage)}</option>
+            {/each}
+          </select>
+        </label>
+        <p class="muted help">{t('composeTargetSettingHelp')}</p>
+
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={settings.composeInstantReplace}
+            onchange={(event) => {
+              const input = event.currentTarget as HTMLInputElement;
+              onChange({ composeInstantReplace: input.checked });
+            }}
+          />
+          <span>{t('composeInstantSetting')}</span>
+        </label>
+        <p class="muted help">{t('composeInstantSettingHelp')}</p>
+
+        <label class="field">
+          <span>{t('composePlacementSetting')}</span>
+          <select value={settings.composePlacement} onchange={updateComposePlacement}>
+            {#each COMPOSE_PLACEMENTS as placement (placement)}
+              <option value={placement}>{t(placementLabels[placement])}</option>
+            {/each}
+          </select>
+        </label>
+        <p class="muted help">{t('composePlacementSettingHelp')}</p>
+      {/if}
+
+      <label class="check">
         <input
-          type="text"
-          value={customHostInput}
-          placeholder={t('videoCaptionsCustomHostPlaceholder')}
-          data-sakutto="caption-custom-host"
-          autocomplete="off"
-          spellcheck="false"
-          oninput={(event) => {
-            customHostInput = (event.currentTarget as HTMLInputElement).value;
-            customHostError = null;
-          }}
-          onkeydown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              addCustomHost();
-            }
+          type="checkbox"
+          data-sakutto="gmail-banner"
+          checked={settings.gmailTranslateBanner}
+          onchange={(event) => {
+            const input = event.currentTarget as HTMLInputElement;
+            mailDenied = false;
+            void (async () => {
+              // User gesture: resolveMailBannerToggle must call permissions.request with no prior pause.
+              const result = await resolveMailBannerToggle(input.checked);
+              input.checked = result.on;
+              if (result.denied) {
+                mailDenied = true;
+                onPermissionDenied?.();
+                return;
+              }
+              onChange({ gmailTranslateBanner: result.on });
+            })();
           }}
         />
-        <button type="button" data-sakutto="caption-custom-host-add" onclick={addCustomHost}>
-          {t('videoCaptionsCustomHostAdd')}
-        </button>
-      </div>
-      {#if customHostError === 'invalid'}
-        <p class="error" role="alert" data-sakutto="caption-custom-host-invalid">
-          {t('videoCaptionsCustomHostInvalid')}
+        <span>{t('settingsGmailBanner')}</span>
+      </label>
+      {#if mailDenied}
+        <p class="error" role="alert" data-sakutto="mail-banner-denied">
+          {t('mailBannerPermissionDenied')}
         </p>
       {/if}
-      {#if customHostError === 'denied'}
-        <p class="error" role="alert" data-sakutto="caption-custom-host-denied">
-          {t('videoCaptionsCustomHostDenied')}
-        </p>
-      {/if}
-      {#if settings.captionCustomHosts.length > 0}
-        <ul class="custom-host-list">
-          {#each settings.captionCustomHosts as host (host)}
-            <li>
-              <span>{host}</span>
+      <p class="muted help">{t('settingsGmailBannerHelp')}</p>
+
+      {#if settings.gmailTranslateBanner}
+        <div class="field gmail-languages" data-sakutto="gmail-auto-langs">
+          <div class="field-heading">
+            <span>{t('settingsGmailAutoLangs')}</span>
+            {#if settings.gmailAutoTranslateLangs.length > 0}
               <button
                 type="button"
-                data-sakutto="caption-custom-host-remove"
-                onclick={() => removeCustomHost(host)}
+                class="link-button"
+                data-sakutto="gmail-auto-langs-clear"
+                onclick={() => clearGmailLanguages('auto')}
               >
-                {t('videoCaptionsCustomHostRemove')}
+                {t('settingsGmailClearLangs')}
               </button>
-            </li>
-          {/each}
-        </ul>
+            {/if}
+          </div>
+          {#if settings.gmailAutoTranslateLangs.length === 0}
+            <p class="muted help">{t('settingsGmailNoAutoLangs')}</p>
+          {:else}
+            <ul class="custom-host-list">
+              {#each settings.gmailAutoTranslateLangs as language (language)}
+                <li>
+                  <span>{displayLanguage(language, uiLanguage)}</span>
+                  <button
+                    type="button"
+                    data-sakutto="gmail-auto-lang-remove"
+                    aria-label={`${t('settingsGmailRemoveLang')} ${displayLanguage(language, uiLanguage)}`}
+                    onclick={() => removeGmailLanguage(language)}
+                  >
+                    {t('settingsGmailRemoveLang')}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+
+        <div class="field gmail-languages" data-sakutto="gmail-never-langs">
+          <div class="field-heading">
+            <span>{t('settingsGmailNeverLangs')}</span>
+            {#if settings.gmailNeverTranslateLangs.length > 0}
+              <button
+                type="button"
+                class="link-button"
+                data-sakutto="gmail-never-langs-clear"
+                onclick={() => clearGmailLanguages('never')}
+              >
+                {t('settingsGmailClearLangs')}
+              </button>
+            {/if}
+          </div>
+          {#if settings.gmailNeverTranslateLangs.length === 0}
+            <p class="muted help">{t('settingsGmailNoNeverLangs')}</p>
+          {:else}
+            <ul class="custom-host-list">
+              {#each settings.gmailNeverTranslateLangs as language (language)}
+                <li>
+                  <span>{displayLanguage(language, uiLanguage)}</span>
+                  <button
+                    type="button"
+                    data-sakutto="gmail-never-lang-remove"
+                    aria-label={`${t('settingsGmailRemoveLang')} ${displayLanguage(language, uiLanguage)}`}
+                    onclick={() => removeGmailLanguage(language)}
+                  >
+                    {t('settingsGmailRemoveLang')}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+      {/if}
+
+      <label class="check">
+        <input
+          type="checkbox"
+          data-sakutto="video-captions"
+          checked={settings.translateVideoCaptions}
+          onchange={(event) => {
+            const input = event.currentTarget as HTMLInputElement;
+            captionDenied = false;
+            void (async () => {
+              // User gesture: resolveCaptionToggle must call permissions.request with no prior pause.
+              const result = await resolveCaptionToggle(input.checked);
+              input.checked = result.on;
+              if (result.denied) {
+                captionDenied = true;
+                onPermissionDenied?.();
+                return;
+              }
+              onChange({ translateVideoCaptions: result.on });
+            })();
+          }}
+        />
+        <span>{t('videoCaptionsSetting')}</span>
+      </label>
+      {#if captionDenied}
+        <p class="error" role="alert" data-sakutto="video-captions-denied">
+          {t('videoCaptionsPermissionDenied')}
+        </p>
+      {/if}
+      <p class="muted help">{t('videoCaptionsSettingHelp')}</p>
+
+      {#if settings.translateVideoCaptions}
+        <label class="check">
+          <input
+            type="checkbox"
+            data-sakutto="video-captions-original"
+            checked={settings.videoCaptionDisplay === 'bilingual'}
+            onchange={(event) => {
+              const input = event.currentTarget as HTMLInputElement;
+              onChange({ videoCaptionDisplay: input.checked ? 'bilingual' : 'replace' });
+            }}
+          />
+          <span>{t('videoCaptionsShowOriginalSetting')}</span>
+        </label>
+        <p class="muted help">{t('videoCaptionsDisplayHelp')}</p>
+
+        <label class="check">
+          <input
+            type="checkbox"
+            data-sakutto="video-captions-original-toggle"
+            checked={settings.videoCaptionOriginalToggle}
+            onchange={(event) => {
+              const input = event.currentTarget as HTMLInputElement;
+              onChange({ videoCaptionOriginalToggle: input.checked });
+            }}
+          />
+          <span>{t('videoCaptionsOriginalToggleSetting')}</span>
+        </label>
+        <p class="muted help">{t('videoCaptionsOriginalToggleHelp')}</p>
+
+        <div class="field caption-size" data-sakutto="video-captions-size">
+          <span>{t('videoCaptionsSizeLabel')}</span>
+          <div class="caption-preview" aria-hidden="true">
+            <div class="caption-preview-player">
+              <div class="caption-preview-lines" style:font-size="{previewFontPx}px">
+                <div class="caption-preview-original">The north window sells tickets.</div>
+                <div class="caption-preview-translation">北側窓口では切符を売っています。</div>
+              </div>
+            </div>
+          </div>
+          <input
+            type="range"
+            min={VIDEO_CAPTION_SIZE_MIN}
+            max={VIDEO_CAPTION_SIZE_MAX}
+            step="1"
+            value={settings.videoCaptionSize}
+            aria-label={t('videoCaptionsSizeLabel')}
+            data-sakutto="video-captions-size-slider"
+            oninput={updateVideoCaptionSize}
+          />
+          <p class="muted help">{t('videoCaptionsSizeHelp')}</p>
+        </div>
+
+        <div class="field caption-position" data-sakutto="video-captions-position">
+          <button
+            type="button"
+            data-sakutto="video-captions-position-reset"
+            onclick={() => onChange({ videoCaptionPositions: {} })}
+          >
+            {t('videoCaptionsPositionReset')}
+          </button>
+          <p class="muted help">{t('videoCaptionsPositionHelp')}</p>
+        </div>
+
+        <div class="field custom-hosts" data-sakutto="caption-custom-hosts">
+          <span>{t('videoCaptionsCustomSitesLabel')}</span>
+          <p class="muted help">{t('videoCaptionsCustomSitesHelp')}</p>
+          <label class="check">
+            <input
+              type="checkbox"
+              data-sakutto="caption-custom-host-subdomains"
+              checked={customHostWildcard}
+              onchange={(event) => {
+                customHostWildcard = (event.currentTarget as HTMLInputElement).checked;
+              }}
+            />
+            <span>{t('videoCaptionsCustomHostSubdomains')}</span>
+          </label>
+          <div class="custom-host-row">
+            <input
+              type="text"
+              value={customHostInput}
+              placeholder={t('videoCaptionsCustomHostPlaceholder')}
+              data-sakutto="caption-custom-host"
+              autocomplete="off"
+              spellcheck="false"
+              oninput={(event) => {
+                customHostInput = (event.currentTarget as HTMLInputElement).value;
+                customHostError = null;
+              }}
+              onkeydown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  addCustomHost();
+                }
+              }}
+            />
+            <button type="button" data-sakutto="caption-custom-host-add" onclick={addCustomHost}>
+              {t('videoCaptionsCustomHostAdd')}
+            </button>
+          </div>
+          {#if customHostError === 'invalid'}
+            <p class="error" role="alert" data-sakutto="caption-custom-host-invalid">
+              {t('videoCaptionsCustomHostInvalid')}
+            </p>
+          {/if}
+          {#if customHostError === 'denied'}
+            <p class="error" role="alert" data-sakutto="caption-custom-host-denied">
+              {t('videoCaptionsCustomHostDenied')}
+            </p>
+          {/if}
+          {#if settings.captionCustomHosts.length > 0}
+            <ul class="custom-host-list">
+              {#each settings.captionCustomHosts as host (host)}
+                <li>
+                  <span>{host}</span>
+                  <button
+                    type="button"
+                    data-sakutto="caption-custom-host-remove"
+                    onclick={() => removeCustomHost(host)}
+                  >
+                    {t('videoCaptionsCustomHostRemove')}
+                  </button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
       {/if}
     </div>
-  {/if}
+  </details>
 </div>
 
 <style>
@@ -859,5 +871,25 @@
     font-size: 11px;
     font-weight: 600;
     text-decoration: underline;
+  }
+
+  .advanced-group {
+    margin-top: var(--space-1);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border);
+  }
+
+  .advanced-summary {
+    cursor: pointer;
+    user-select: none;
+    color: var(--accent-strong);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .advanced-body {
+    display: grid;
+    gap: var(--space-3);
+    margin-top: var(--space-3);
   }
 </style>

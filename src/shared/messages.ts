@@ -56,6 +56,8 @@ export interface PageViewState {
   skipped: number;
   /** True when the active local-server translation hit a connection/server error. */
   serverFault?: boolean;
+  /** Number of completed page blocks served from the local translation cache. */
+  cached?: number;
 }
 
 export type ContentFeatureName = 'mail' | 'captions';
@@ -268,7 +270,8 @@ export function isPageViewState(value: unknown): value is PageViewState {
     (value.tokensPerSecond === null || typeof value.tokensPerSecond === 'number') &&
     (value.segmentsPerSecond === null || typeof value.segmentsPerSecond === 'number') &&
     (value.skipped === undefined || (typeof value.skipped === 'number' && value.skipped >= 0)) &&
-    (value.serverFault === undefined || typeof value.serverFault === 'boolean')
+    (value.serverFault === undefined || typeof value.serverFault === 'boolean') &&
+    (value.cached === undefined || (typeof value.cached === 'number' && value.cached >= 0))
   );
 }
 

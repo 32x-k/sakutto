@@ -233,6 +233,12 @@ function composeReadiness(
   });
 }
 
+function formatCacheBadge(cached: number, done: number): string {
+  const ja = currentUiLanguage().toLowerCase().startsWith('ja');
+  const label = ja ? 'キャッシュ' : 'Cache';
+  return cached >= done ? label : `${label} ${String(cached)}/${String(done)}`;
+}
+
 function overlayLabels(): OverlayLabels {
   return {
     original: t('originalLabel'),
@@ -253,6 +259,7 @@ function overlayLabels(): OverlayLabels {
     barProgress: (done, total) => t('pageProgress', [String(done), String(total)]),
     barRate: (tokens, segments) => t('pageRate', [tokens, segments]),
     barDone: t('pageTranslated'),
+    barCached: formatCacheBadge,
     barPartial: (blocks) => t('pagePartial', [String(blocks)]),
     modelMissing: t('modelSelectionMissing'),
     barOriginal: t('restoreThisPage'),
@@ -279,6 +286,7 @@ function floatingMenuLabels(): FloatingMenuLabels {
     close: t('close'),
     pageTranslated: t('pageTranslated'),
     pageProgress: (done, total) => t('pageProgress', [String(done), String(total)]),
+    pageCached: formatCacheBadge,
     serverError: t('localServerFailed'),
   };
 }
@@ -699,6 +707,7 @@ export function contentMain(): void {
             total: view.total,
             auto: liveRule.auto,
             serverFault: view.serverFault === true,
+            cached: view.cached ?? 0,
             targetLanguage: effectivePageTarget(
               liveSettings.targetLanguage,
               liveRule.targetLanguage,
